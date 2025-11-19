@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-import streamlit as st
 import json
 import tempfile
-from pathlib import Path
+
 import pandas as pd
-from datetime import datetime
+import streamlit as st
 
-from modules.har_analyzer import HARAnalyzer
-from modules.docker_manager import DockerZAPManager
-from modules.zap_scanner import ZAPScanner
-from modules.reporter import Reporter
-from modules.idor_detector import IDORDetector, IDORStatus
 from modules.acceptance_engine import AcceptanceEngine
-
+from modules.docker_manager import DockerZAPManager
+from modules.har_analyzer import HARAnalyzer
+from modules.idor_detector import IDORDetector, IDORStatus
+from modules.zap_scanner import ZAPScanner
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -218,6 +215,7 @@ def launch_zap_scan(parsed_data, selected_indices):
     except Exception as e:
         st.error(f"Scan failed: {e}")
         import traceback
+
         st.code(traceback.format_exc())
 
 
@@ -277,6 +275,7 @@ def render_idor_tab():
         except Exception as e:
             st.error(f"IDOR detection failed: {e}")
             import traceback
+
             st.code(traceback.format_exc())
 
 
@@ -418,7 +417,7 @@ def render_acceptance_tab():
     if 'criteria' in st.session_state and st.session_state.criteria:
         st.subheader("Active Criteria")
         for i, crit in enumerate(st.session_state.criteria):
-            st.write(f"{i+1}. {crit}")
+            st.write(f"{i + 1}. {crit}")
 
     if st.button("🎯 Evaluate Acceptance", type="primary"):
         if 'criteria' not in st.session_state or not st.session_state.criteria:

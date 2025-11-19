@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-import sys
 import argparse
-import yaml
+import sys
 from pathlib import Path
 
-from modules.har_analyzer import HARAnalyzer
+import yaml
+
 from modules.docker_manager import DockerZAPManager
-from modules.zap_scanner import ZAPScanner
+from modules.har_analyzer import HARAnalyzer
 from modules.reporter import Reporter
+from modules.zap_scanner import ZAPScanner
 
 
 def load_config(config_path: str = None) -> dict:
@@ -82,9 +83,9 @@ def main():
 
     config = load_config(args.config)
 
-    print("="*80)
+    print("=" * 80)
     print("ZAP AUTOMATED SECURITY SCANNER")
-    print("="*80)
+    print("=" * 80)
 
     print("\n[1/5] Analyzing HAR file...")
     analyzer = HARAnalyzer(args.har_file, config)
@@ -130,9 +131,9 @@ def main():
         reporter.save_html_report(scanner.zap, f"{args.output}/report_{reporter.timestamp}.html")
         reporter.save_critical_findings(alerts)
 
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("SCAN COMPLETE")
-        print("="*80)
+        print("=" * 80)
 
     except KeyboardInterrupt:
         print("\n[!] Scan interrupted by user")
@@ -141,6 +142,7 @@ def main():
     except Exception as e:
         print(f"\n[!] Error during scan: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

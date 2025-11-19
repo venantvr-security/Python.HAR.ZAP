@@ -1,9 +1,11 @@
-from zapv2 import ZAPv2
 import time
 from typing import Dict, List
 
+from zapv2 import ZAPv2
+
 
 class ZAPScanner:
+
     def __init__(self, zap_config: Dict, har_data: Dict, scan_config: Dict):
         self.zap = ZAPv2(
             apikey=zap_config['api_key'],

@@ -1,8 +1,9 @@
-import yaml
 import json
-import requests
 from typing import Dict, List, Optional
 from urllib.parse import urljoin
+
+import requests
+import yaml
 
 
 class OpenAPIImporter:
