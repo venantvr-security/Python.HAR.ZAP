@@ -1,0 +1,33 @@
+# ZAP Scanner Configuration
+
+# Domains to include in scan (empty = all domains)
+scope_domains:
+  # - "example.com"
+  # - "api.example.com"
+
+# Domains to exclude from scan
+exclude_domains:
+  - "google-analytics.com"
+  - "googletagmanager.com"
+  - "facebook.com"
+  - "doubleclick.net"
+  - "cdn.jsdelivr.net"
+  - "fonts.googleapis.com"
+  - "ajax.googleapis.com"
+
+# HTTP methods to process
+allowed_methods:
+  - GET
+  - POST
+  - PUT
+  - DELETE
+  - PATCH
+
+# Docker ZAP configuration
+zap_port: 8080
+zap_image: "ghcr.io/zaproxy/zaproxy:stable"
+
+# Scan options
+scan_fuzzable_urls: true
+scan_api_endpoints: true
+max_scan_time: 300
