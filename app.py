@@ -10,6 +10,9 @@ from modules.docker_manager import DockerZAPManager
 from modules.har_analyzer import HARAnalyzer
 from modules.idor_detector import IDORDetector, IDORStatus
 from modules.zap_scanner import ZAPScanner
+from modules.redteam_attacks import RedTeamOrchestrator
+from modules.passive_analysis import PassiveAnalysisOrchestrator
+from modules.redteam_ui_helpers import render_redteam_results, render_passive_results
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -23,13 +26,17 @@ if 'idor_results' not in st.session_state:
     st.session_state.idor_results = None
 if 'docker_manager' not in st.session_state:
     st.session_state.docker_manager = None
+if 'redteam_results' not in st.session_state:
+    st.session_state.redteam_results = None
+if 'passive_results' not in st.session_state:
+    st.session_state.passive_results = None
 
 
 def main():
     st.title("🛡️ DAST Security Platform")
     st.markdown("**Automated Dynamic Application Security Testing with OWASP ZAP**")
 
-    tabs = st.tabs(["📤 Upload & Configure", "🔍 ZAP Scan", "🎯 IDOR Testing", "📊 Results", "✅ Acceptance"])
+    tabs = st.tabs(["📤 Upload & Configure", "🔍 ZAP Scan", "🎯 IDOR Testing", "🔴 Red Team", "🔵 Passive Scan", "📊 Results", "✅ Acceptance"])
 
     with tabs[0]:
         render_upload_tab()
@@ -41,9 +48,15 @@ def main():
         render_idor_tab()
 
     with tabs[3]:
-        render_results_tab()
+        render_redteam_tab()
 
     with tabs[4]:
+        render_passive_tab()
+
+    with tabs[5]:
+        render_results_tab()
+
+    with tabs[6]:
         render_acceptance_tab()
 
 
@@ -279,6 +292,98 @@ def render_idor_tab():
             st.code(traceback.format_exc())
 
 
+def render_redteam_tab():
+    st.header("🔴 Red Team Attacks")
+
+    st.markdown("""
+    **Offensive Security Testing - Business Logic & Access Control**
+
+    Tests:
+    - 🔓 Unauthenticated Replay (Critical)
+    - 🎭 Mass Assignment / Privilege Escalation
+    - 🔍 Hidden Parameter Discovery
+    - ⚡ Race Condition Detection
+    """)
+
+    if 'har_data' not in st.session_state:
+        st.warning("⚠️ Please upload a HAR file first")
+        return
+
+    attack_types = st.multiselect(
+        "Select Attack Types",
+        ["Unauthenticated Replay", "Mass Assignment", "Hidden Parameters", "Race Conditions"],
+        default=["Unauthenticated Replay", "Mass Assignment"]
+    )
+
+    if st.button("🚀 Launch Red Team Attacks", type="primary"):
+        with st.spinner("Running offensive security tests..."):
+            try:
+                orchestrator = RedTeamOrchestrator(st.session_state.har_data)
+                results = orchestrator.run_all_attacks()
+
+                st.session_state.redteam_results = results
+
+                critical_findings = orchestrator.get_critical_findings()
+
+                st.success(f"✓ Red Team scan complete! Found {len(critical_findings)} critical issues")
+
+                summary = orchestrator.generate_report()
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Tests", summary['total_tests'])
+                col2.metric("🚨 Vulnerabilities", summary['total_vulnerabilities'])
+                col3.metric("🔴 Critical", len(critical_findings))
+
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Red Team scan failed: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+
+def render_passive_tab():
+    st.header("🔵 Passive Security Analysis")
+
+    st.markdown("""
+    **Non-Invasive Security Checks**
+
+    - 🛡️ Security Headers Analysis
+    - 🔑 Token Entropy Analysis
+    - 📄 PII/Sensitive Data Leakage
+    - 📚 Stack Trace Detection
+    """)
+
+    if 'har_data' not in st.session_state:
+        st.warning("⚠️ Please upload a HAR file first")
+        return
+
+    if st.button("🔍 Run Passive Analysis", type="primary"):
+        with st.spinner("Analyzing HAR data..."):
+            try:
+                orchestrator = PassiveAnalysisOrchestrator(st.session_state.har_data)
+                results = orchestrator.run_all_checks()
+
+                st.session_state.passive_results = results
+
+                summary = orchestrator.generate_summary()
+
+                st.success(f"✓ Passive analysis complete!")
+
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Issues", summary['total_issues'])
+                col2.metric("🔴 Critical", summary['by_severity']['CRITICAL'])
+                col3.metric("🟠 High", summary['by_severity']['HIGH'])
+                col4.metric("🟡 Medium", summary['by_severity']['MEDIUM'])
+
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Passive analysis failed: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+
 def render_results_tab():
     st.header("📊 Scan Results")
 
@@ -289,7 +394,16 @@ def render_results_tab():
         st.divider()
         render_idor_results()
 
-    if not st.session_state.scan_results and not st.session_state.idor_results:
+    if st.session_state.redteam_results:
+        st.divider()
+        render_redteam_results()
+
+    if st.session_state.passive_results:
+        st.divider()
+        render_passive_results()
+
+    if not any([st.session_state.scan_results, st.session_state.idor_results,
+                st.session_state.redteam_results, st.session_state.passive_results]):
         st.info("No scan results available yet")
 
 
