@@ -1,4 +1,5 @@
 from typing import List, Dict, Any
+
 from modules.idor_detector import IDORStatus
 
 
@@ -115,7 +116,7 @@ class AcceptanceEngine:
         matching_alerts = [
             a for a in alerts
             if pattern in a.get('url', '')
-            and a.get('risk') in ['High', 'Medium']
+               and a.get('risk') in ['High', 'Medium']
         ]
 
         count = len(matching_alerts)
@@ -156,7 +157,7 @@ class AcceptanceEngine:
         sql_alerts = [
             a for a in alerts
             if 'sql' in a.get('alert', '').lower()
-            and a.get('risk') in ['High', 'Medium']
+               and a.get('risk') in ['High', 'Medium']
         ]
         count = len(sql_alerts)
 
@@ -178,7 +179,7 @@ class AcceptanceEngine:
         xss_alerts = [
             a for a in alerts
             if 'xss' in a.get('alert', '').lower() or 'cross site scripting' in a.get('alert', '').lower()
-            and a.get('risk') in ['High', 'Medium']
+               and a.get('risk') in ['High', 'Medium']
         ]
         count = len(xss_alerts)
 

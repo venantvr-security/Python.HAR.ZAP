@@ -3,17 +3,17 @@
 CI/CD-friendly CLI for DAST Security Platform
 Supports fail-fast mode and multiple output formats
 """
-import sys
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from modules.har_analyzer import HARAnalyzer
-from modules.docker_manager import DockerZAPManager
-from modules.zap_scanner import ZAPScanner
-from modules.reporter import Reporter
-from modules.idor_detector import IDORDetector
 from modules.acceptance_engine import AcceptanceEngine
+from modules.docker_manager import DockerZAPManager
+from modules.har_analyzer import HARAnalyzer
+from modules.idor_detector import IDORDetector
+from modules.reporter import Reporter
+from modules.zap_scanner import ZAPScanner
 
 
 def main():
@@ -43,15 +43,15 @@ Examples:
     scan_parser.add_argument('-c', '--config', help='Config YAML file')
     scan_parser.add_argument('-o', '--output', default='./output', help='Output directory')
     scan_parser.add_argument('--format', choices=['json', 'html', 'sarif', 'junit'],
-                            default='json', help='Output format')
+                             default='json', help='Output format')
     scan_parser.add_argument('--max-high', type=int, help='Max high severity alerts')
     scan_parser.add_argument('--max-medium', type=int, help='Max medium severity alerts')
     scan_parser.add_argument('--fail-fast', action='store_true',
-                            help='Exit with code 1 if acceptance criteria fail')
+                             help='Exit with code 1 if acceptance criteria fail')
     scan_parser.add_argument('--no-docker', action='store_true',
-                            help='Use existing ZAP instance')
+                             help='Use existing ZAP instance')
     scan_parser.add_argument('--zap-url', default='http://localhost:8080',
-                            help='ZAP URL if using existing instance')
+                             help='ZAP URL if using existing instance')
     scan_parser.add_argument('--api-key', help='ZAP API key')
 
     idor_parser = subparsers.add_parser('idor', help='Run IDOR detection')
@@ -60,7 +60,7 @@ Examples:
     idor_parser.add_argument('-o', '--output', default='./output', help='Output directory')
     idor_parser.add_argument('--workers', type=int, default=5, help='Parallel workers')
     idor_parser.add_argument('--fail-on-idor', action='store_true',
-                            help='Exit with code 1 if IDOR found')
+                             help='Exit with code 1 if IDOR found')
 
     args = parser.parse_args()
 
@@ -163,6 +163,7 @@ def run_scan(args):
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
@@ -230,6 +231,7 @@ def run_idor(args):
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 

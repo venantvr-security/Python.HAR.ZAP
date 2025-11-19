@@ -5,6 +5,7 @@ Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP or
 ## Features
 
 ### Core Capabilities
+
 - **HAR Intelligence**: Smart parsing with fuzzable parameter detection and auth extraction
 - **Docker Orchestration**: Automated ZAP lifecycle management
 - **IDOR Detection**: Multi-session cross-user testing with visual diff proofs
@@ -13,6 +14,7 @@ Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP or
 - **Acceptance Engine**: Define security criteria with fail-fast CI/CD mode
 
 ### Interfaces
+
 - **Streamlit Web UI**: Self-explanatory dashboard with drag-drop HAR upload
 - **CLI**: CI/CD-friendly with JUnit/SARIF export
 - **Legacy CLI**: Original orchestrator.py for backward compatibility
@@ -26,12 +28,15 @@ pip install -r requirements.txt
 ## Usage
 
 ### Web Interface (Recommended)
+
 ```bash
 streamlit run app.py
 ```
+
 Access at http://localhost:8501
 
 Features:
+
 - Drag-drop HAR upload with live preview
 - Visual target selection
 - Real-time scan progress
@@ -39,6 +44,7 @@ Features:
 - Acceptance criteria builder
 
 ### CI/CD Integration
+
 ```bash
 # Fail build if any high severity alerts
 python cli.py scan traffic.har --max-high 0 --fail-fast
@@ -54,6 +60,7 @@ python cli.py scan traffic.har --format junit --max-high 0 --max-medium 5
 ```
 
 ### Legacy CLI
+
 ```bash
 python orchestrator.py captured_traffic.har -c config.yaml -o ./reports
 ```
@@ -61,6 +68,7 @@ python orchestrator.py captured_traffic.har -c config.yaml -o ./reports
 ## Configuration
 
 Edit `config.yaml`:
+
 ```yaml
 scope_domains:
   - "example.com"
@@ -86,6 +94,7 @@ scan_api_endpoints: true
 Upload two HAR files from different authenticated sessions:
 
 **Via Web UI:**
+
 1. Navigate to "IDOR Testing" tab
 2. Upload Session A (User A)
 3. Upload Session B (User B)
@@ -93,6 +102,7 @@ Upload two HAR files from different authenticated sessions:
 5. Run detection
 
 **Via CLI:**
+
 ```bash
 python cli.py idor \
   --session-a admin.har \
@@ -102,6 +112,7 @@ python cli.py idor \
 ```
 
 Results include:
+
 - Confidence scores
 - Visual HTTP diff (baseline vs test)
 - cURL commands for manual reproduction
@@ -112,6 +123,7 @@ Results include:
 Define security requirements in Web UI or via CLI:
 
 **Criteria Types:**
+
 - `max_high`: Maximum high severity alerts
 - `max_medium`: Maximum medium severity alerts
 - `no_idor`: No IDOR vulnerabilities
@@ -120,6 +132,7 @@ Define security requirements in Web UI or via CLI:
 - `clean_url`: Specific URL pattern must be clean
 
 **Example CI/CD Pipeline:**
+
 ```yaml
 # .gitlab-ci.yml
 security_scan:
@@ -133,32 +146,41 @@ security_scan:
 ## Output Formats
 
 ### JSON (Detailed)
+
 ```bash
 python cli.py scan traffic.har --format json
 ```
+
 Full vulnerability details with payloads and evidence.
 
 ### SARIF (GitHub Security)
+
 ```bash
 python cli.py scan traffic.har --format sarif
 ```
+
 Upload to GitHub Code Scanning for issue tracking.
 
 ### JUnit XML (CI/CD)
+
 ```bash
 python cli.py scan traffic.har --format junit --max-high 0
 ```
+
 Test result format for Jenkins/GitLab/CircleCI.
 
 ### HTML (Human-readable)
+
 ```bash
 python cli.py scan traffic.har --format html
 ```
+
 ZAP native HTML report with charts.
 
 ## Advanced Features
 
 ### OpenAPI/Swagger Import
+
 ```python
 from modules.openapi_importer import OpenAPIImporter
 
@@ -169,6 +191,7 @@ importer.import_to_zap(target_url='https://api.example.com')
 ```
 
 ### Custom Authentication
+
 ```python
 from modules.advanced_zap_config import AdvancedZAPConfig
 
@@ -204,6 +227,7 @@ MIT
 ## Contributing
 
 PRs welcome. Focus areas:
+
 - ML-based false positive reduction
 - Additional auth methods (SAML, Kerberos)
 - Distributed scanning

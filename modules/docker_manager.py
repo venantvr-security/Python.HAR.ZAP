@@ -1,7 +1,8 @@
-import docker
-import time
 import secrets
+import time
 from typing import Optional
+
+import docker
 
 
 class DockerZAPManager:

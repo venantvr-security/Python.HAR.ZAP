@@ -2,8 +2,8 @@
 
 # Domains to include in scan (empty = all domains)
 scope_domains:
-  # - "example.com"
-  # - "api.example.com"
+# - "example.com"
+# - "api.example.com"
 
 # Domains to exclude from scan
 exclude_domains:

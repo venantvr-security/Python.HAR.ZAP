@@ -4,6 +4,7 @@ from typing import List, Dict
 
 
 class Reporter:
+
     def __init__(self, output_dir: str = './output'):
         self.output_dir = output_dir
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -14,15 +15,15 @@ class Reporter:
         low_alerts = [a for a in alerts if a.get('risk') == 'Low']
         info_alerts = [a for a in alerts if a.get('risk') == 'Informational']
 
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("SECURITY SCAN RESULTS")
-        print("="*80)
+        print("=" * 80)
         print(f"Total Alerts: {len(alerts)}")
         print(f"  High:   {len(high_alerts)}")
         print(f"  Medium: {len(medium_alerts)}")
         print(f"  Low:    {len(low_alerts)}")
         print(f"  Info:   {len(info_alerts)}")
-        print("="*80)
+        print("=" * 80)
 
         if high_alerts:
             print("\n[!] HIGH RISK ALERTS:")
