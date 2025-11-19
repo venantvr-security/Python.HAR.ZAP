@@ -1,14 +1,37 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
 venv/
+env/
 ENV/
-output/
-*.har
-.env
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Application
+output/
+wordlists/
+*.har
 *.log
+.env
+
+# OS
+.DS_Store
+Thumbs.db
