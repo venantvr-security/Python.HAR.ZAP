@@ -2,6 +2,8 @@ import json
 from datetime import datetime
 from typing import List, Dict
 
+from modules.utils.masking import mask_sensitive_data, mask_string
+
 
 class Reporter:
 
@@ -38,16 +40,21 @@ class Reporter:
             if len(medium_alerts) > 10:
                 print(f"... and {len(medium_alerts) - 10} more medium alerts")
 
-    def _print_alert(self, alert: Dict):
+    @staticmethod
+    def _print_alert(alert: Dict):
+        # Mask sensitive data before printing
         print(f"\n  [{alert.get('risk', 'Unknown')}] {alert.get('alert', 'No name')}")
-        print(f"  URL: {alert.get('url', 'N/A')}")
+        print(f"  URL: {mask_string(alert.get('url', 'N/A'))}")
         print(f"  CWE: {alert.get('cweid', 'N/A')}")
-        print(f"  Description: {alert.get('description', 'N/A')[:200]}...")
+        print(f"  Description: {mask_string(alert.get('description', 'N/A')[:200])}...")
 
     def save_json_report(self, alerts: List[Dict], har_summary: str):
+        # Mask sensitive data in alerts before saving
+        masked_alerts = [mask_sensitive_data(alert) for alert in alerts]
+
         report_data = {
             'timestamp': self.timestamp,
-            'har_analysis': har_summary,
+            'har_analysis': mask_string(har_summary),
             'total_alerts': len(alerts),
             'alerts_by_risk': {
                 'high': len([a for a in alerts if a.get('risk') == 'High']),
@@ -55,7 +62,7 @@ class Reporter:
                 'low': len([a for a in alerts if a.get('risk') == 'Low']),
                 'informational': len([a for a in alerts if a.get('risk') == 'Informational'])
             },
-            'alerts': alerts
+            'alerts': masked_alerts
         }
 
         output_file = f"{self.output_dir}/scan_report_{self.timestamp}.json"
@@ -96,11 +103,14 @@ class Reporter:
             f.write("=" * 80 + "\n\n")
 
             for i, alert in enumerate(critical, 1):
-                f.write(f"{i}. [{alert.get('risk')}] {alert.get('alert')}\n")
-                f.write(f"   URL: {alert.get('url')}\n")
-                f.write(f"   CWE: {alert.get('cweid')}\n")
-                f.write(f"   Description: {alert.get('description')}\n")
-                f.write(f"   Solution: {alert.get('solution', 'N/A')}\n")
+                # Mask sensitive data before writing
+                masked_alert = mask_sensitive_data(alert)
+
+                f.write(f"{i}. [{masked_alert.get('risk')}] {masked_alert.get('alert')}\n")
+                f.write(f"   URL: {masked_alert.get('url')}\n")
+                f.write(f"   CWE: {masked_alert.get('cweid')}\n")
+                f.write(f"   Description: {masked_alert.get('description')}\n")
+                f.write(f"   Solution: {masked_alert.get('solution', 'N/A')}\n")
                 f.write("\n" + "-" * 80 + "\n\n")
 
         print(f"[Report] Critical findings saved: {output_file}")

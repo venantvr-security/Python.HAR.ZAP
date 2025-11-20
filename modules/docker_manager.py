@@ -13,6 +13,7 @@ class DockerZAPManager:
     def __init__(self, config: dict):
         self.config = config
         self.client = docker.from_env()
+        # noinspection PyUnresolvedReferences
         self.container: Optional[docker.models.containers.Container] = None
         self.api_key = secrets.token_hex(16)
         self.zap_port = config.get('zap_port', self.DEFAULT_PORT)
@@ -30,7 +31,7 @@ class DockerZAPManager:
         self.container = self.client.containers.run(
             self.image,
             command=f"zap.sh -daemon -host 0.0.0.0 -port {self.zap_port} -config api.key={self.api_key} -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true",
-            ports={f'{self.zap_port}/tcp': self.zap_port},
+            ports={f'{self.zap_port}/tcp': ('127.0.0.1', self.zap_port)},
             detach=True,
             remove=False,
             name=f"zap-scanner-{int(time.time())}"
@@ -62,7 +63,7 @@ class DockerZAPManager:
                     version = response.json().get('version', 'unknown')
                     print(f"[Docker] ZAP ready (version: {version})")
                     return
-            except:
+            except Exception:  # Broad exception for robustness
                 pass
 
             time.sleep(2)

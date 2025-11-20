@@ -2,6 +2,26 @@
 import streamlit as st
 
 
+def show_attack_docs(attack_type):
+    """Display attack documentation in expander"""
+    doc_mapping = {
+        "Unauthenticated Replay": "docs/redteam/unauthenticated_replay.md",
+        "Mass Assignment": "docs/redteam/mass_assignment.md",
+        "Hidden Parameters": "docs/redteam/hidden_parameters.md",
+        "Race Conditions": "docs/redteam/race_conditions.md"
+    }
+
+    doc_path = doc_mapping.get(attack_type)
+    if doc_path:
+        try:
+            with open(doc_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                return content
+        except FileNotFoundError:
+            return f"Documentation not found: {doc_path}"
+    return "No documentation available"
+
+
 def render_redteam_results():
     """Render Red Team attack results"""
     st.subheader("🔴 Red Team Attack Results")
@@ -9,13 +29,21 @@ def render_redteam_results():
     results = st.session_state.redteam_results
 
     tabs = st.tabs([
-        "Unauthenticated Replay",
-        "Mass Assignment",
-        "Hidden Parameters",
-        "All Findings"
+        "🔓 Unauthenticated Replay",
+        "🎭 Mass Assignment",
+        "🔍 Hidden Parameters",
+        "📋 All Findings"
     ])
 
     with tabs[0]:
+        col1, col2 = st.columns([0.95, 0.05])
+        with col1:
+            st.markdown("### Unauthenticated Replay Results")
+        with col2:
+            if st.button("❓", key="help_unauth_results"):
+                with st.expander("📚 About this attack", expanded=True):
+                    st.markdown(show_attack_docs("Unauthenticated Replay"))
+
         unauth_results = results.get('unauth_replay', [])
         vulnerable = [r for r in unauth_results if r.vulnerable]
 
@@ -35,6 +63,14 @@ def render_redteam_results():
             st.success("✅ All authenticated endpoints require proper authentication")
 
     with tabs[1]:
+        col1, col2 = st.columns([0.95, 0.05])
+        with col1:
+            st.markdown("### Mass Assignment Results")
+        with col2:
+            if st.button("❓", key="help_mass_results"):
+                with st.expander("📚 About this attack", expanded=True):
+                    st.markdown(show_attack_docs("Mass Assignment"))
+
         mass_assignment = results.get('mass_assignment', [])
         vulnerable = [r for r in mass_assignment if r.vulnerable]
 
@@ -51,6 +87,14 @@ def render_redteam_results():
             st.success("✅ No mass assignment vulnerabilities detected")
 
     with tabs[2]:
+        col1, col2 = st.columns([0.95, 0.05])
+        with col1:
+            st.markdown("### Hidden Parameters Results")
+        with col2:
+            if st.button("❓", key="help_hidden_results"):
+                with st.expander("📚 About this attack", expanded=True):
+                    st.markdown(show_attack_docs("Hidden Parameters"))
+
         hidden_params = results.get('hidden_params', [])
 
         if hidden_params:

@@ -18,20 +18,37 @@ Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP or
 ### Attack Vectors
 
 #### Red Team (Offensive)
+
 - **Unauthenticated Replay**: Tests if auth headers can be removed (CRITICAL)
 - **Mass Assignment**: Injects privilege escalation parameters (`{"role": "admin"}`)
 - **Hidden Parameters**: Discovers debug/admin mode switches (`?debug=true`)
 - **Race Conditions**: Identifies TOCTOU vulnerabilities (transfer/coupon endpoints)
 
 #### Passive (Non-Invasive)
+
 - **Security Headers**: HSTS, CSP, X-Frame-Options, Secure/HttpOnly cookies
 - **Sensitive Data**: Regex detection for PII, API keys, JWT, passwords, SSN, credit cards
 - **Token Entropy**: Shannon entropy analysis for session predictability
 - **Stack Traces**: Detects information disclosure in error responses
 
+### New Features
+
+#### HAR Preprocessing (Unified Pipeline)
+
+- **Single-pass extraction**: Endpoints, payloads, querystrings, dictionaries
+- **Advanced filtering**: Methods, domains, content-types, status codes, static exclusion
+- **Export formats**: Unified JSON or granular component files
+- **Token extraction**: Smart fuzzing wordlist generation from traffic
+
+#### Dictionary & Payload System
+
+- **PayloadAnalyzer**: Schema extraction, key-value pairs, template building
+- **PayloadReconstructor**: Attack payload generation (mass assignment, injection, fuzzing)
+- **DictionaryManager**: Extensible dictionaries with custom extensions
+
 ### Interfaces
 
-- **Streamlit Web UI**: Self-explanatory dashboard with 7 specialized tabs
+- **Streamlit Web UI**: Self-explanatory dashboard with 9 specialized tabs
 - **CLI**: CI/CD-friendly with JUnit/SARIF export
 - **Legacy CLI**: Original orchestrator.py for backward compatibility
 
@@ -52,13 +69,16 @@ streamlit run app.py
 Access at http://localhost:8501
 
 Tabs:
+
 1. **Upload & Configure**: HAR upload, scope/exclusion rules, attack type selection
-2. **ZAP Scan**: Traditional OWASP ZAP active/passive scanning
-3. **IDOR Testing**: Multi-session cross-user access control testing
-4. **Red Team**: Offensive security attacks (auth bypass, privilege escalation)
-5. **Passive Scan**: Non-invasive security analysis (headers, leaks, entropy)
-6. **Results**: Unified view of all findings with severity filtering
-7. **Acceptance**: Define pass/fail criteria for CI/CD integration
+2. **HAR Preprocessing**: Unified HAR processing with filters, extraction, export
+3. **ZAP Scan**: Traditional OWASP ZAP active/passive scanning
+4. **ZAP Fuzzer**: Intelligent fuzzing with extracted tokens/IDs from HAR
+5. **IDOR Testing**: Multi-session cross-user access control testing
+6. **Red Team**: Offensive security attacks (auth bypass, privilege escalation)
+7. **Passive Scan**: Non-invasive security analysis (headers, leaks, entropy)
+8. **Results**: Unified view of all findings with severity filtering
+9. **Acceptance**: Define pass/fail criteria for CI/CD integration
 
 ### CI/CD Integration
 
@@ -113,11 +133,13 @@ scan_api_endpoints: true
 Tests if endpoints remain accessible after removing authentication headers.
 
 **Detection Logic:**
+
 - Extract requests with `Authorization`/`Cookie` headers
 - Replay without auth headers
 - Vulnerable if: HTTP 200 + content_length > 100 bytes + status matches original
 
 **Example Output:**
+
 ```
 🚨 CRITICAL: https://api.example.com/user/profile accessible without auth!
 Confidence: 87%
@@ -129,11 +151,24 @@ Evidence: Status 200, Content: 2.3KB (original: 2.4KB)
 Injects privilege escalation parameters into POST/PUT/PATCH requests.
 
 **Payloads Tested:**
+
 ```json
-{"role": "admin"}
-{"is_admin": true}
-{"permissions": ["admin", "write", "delete"]}
-{"balance": 999999}
+{
+  "role": "admin"
+}
+{
+  "is_admin": true
+}
+{
+  "permissions": [
+    "admin",
+    "write",
+    "delete"
+  ]
+}
+{
+  "balance": 999999
+}
 ```
 
 **Vulnerable if:** Server accepts payload (HTTP 200/201) without error message
@@ -143,6 +178,7 @@ Injects privilege escalation parameters into POST/PUT/PATCH requests.
 Discovers debug/admin parameters not visible in normal traffic.
 
 **Common Params Tested:**
+
 - `?debug=true`
 - `?admin=1`
 - `?test=yes`
@@ -153,12 +189,14 @@ Discovers debug/admin parameters not visible in normal traffic.
 ### Passive Analysis
 
 **Security Headers:**
+
 - Missing: HSTS, CSP, X-Frame-Options, X-Content-Type-Options
 - Weak CSP: `unsafe-inline`, `unsafe-eval`, wildcard sources
 - Insecure Cookies: Missing `Secure` or `HttpOnly` flags
 
 **Sensitive Data Scanner:**
 Regex patterns for:
+
 - Email addresses, phone numbers, SSN
 - Credit card numbers (PCI-DSS violation)
 - API keys (AWS: `AKIA[0-9A-Z]{16}`)
@@ -166,6 +204,7 @@ Regex patterns for:
 - Private keys (RSA/EC)
 
 **Token Entropy Analysis:**
+
 - Shannon entropy calculation
 - Flags tokens with < 4.0 bits entropy or < 16 chars length
 - Severity: CRITICAL if < 3.0 bits
@@ -316,16 +355,19 @@ modules/
 ## Technical Implementation
 
 **Parallelization:**
+
 - `ThreadPoolExecutor` for Red Team attacks (5-10 workers)
 - Async/await support via `aiohttp` for race condition testing
 
 **Detection Algorithms:**
+
 - Content-length ratio for auth bypass (> 50% threshold)
 - Shannon entropy for token randomness
 - Regex-based pattern matching for sensitive data
 - HTTP status code + response size heuristics
 
 **Security:**
+
 - TLS verification disabled for testing (pentest context)
 - Requests sanitized (no credentials in logs)
 - Docker isolation for ZAP processes
@@ -345,6 +387,7 @@ MIT
 ## Limitations & Manual Testing Recommendations
 
 **Automated (This Tool):**
+
 - ✅ Unauthenticated replay
 - ✅ Mass assignment detection
 - ✅ IDOR (with 2 sessions)
@@ -352,6 +395,7 @@ MIT
 - ✅ Sensitive data leakage
 
 **Requires Manual Testing:**
+
 - ⚠️ Complex business logic (e.g., negative pricing)
 - ⚠️ Multi-step workflows (checkout flow manipulation)
 - ⚠️ Race conditions (requires precise timing + burst testing)

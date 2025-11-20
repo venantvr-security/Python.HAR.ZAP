@@ -1,12 +1,10 @@
 """
 Passive Security Analysis - Headers, Leaks, Token Entropy
 """
-import base64
-import hashlib
 import math
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Set
+from typing import Dict, List
 
 
 @dataclass
@@ -70,6 +68,7 @@ class SecurityHeadersAnalyzer:
             url = entry.get('request', {}).get('url', '')
 
             from urllib.parse import urlparse
+
             domain = urlparse(url).netloc
 
             if domain in checked_domains:
@@ -218,7 +217,8 @@ class SensitiveDataScanner:
 
         return self.findings
 
-    def _get_severity(self, data_type: str) -> str:
+    @staticmethod
+    def _get_severity(data_type: str) -> str:
         """Determine severity based on data type"""
         critical_types = ['password', 'private_key', 'api_key', 'aws_key', 'ssn', 'credit_card']
         high_types = ['email', 'phone', 'jwt']
@@ -293,7 +293,8 @@ class TokenEntropyAnalyzer:
 
         return self.tokens
 
-    def calculate_entropy(self, token: str) -> float:
+    @staticmethod
+    def calculate_entropy(token: str) -> float:
         """Calculate Shannon entropy of token"""
         if not token:
             return 0.0
@@ -346,9 +347,9 @@ class PassiveAnalysisOrchestrator:
 
     def run_all_checks(self) -> Dict:
         """Run all passive security checks"""
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("PASSIVE SECURITY ANALYSIS")
-        print("="*80)
+        print("=" * 80)
 
         print("[Passive] Analyzing security headers...")
         self.results['headers'] = SecurityHeadersAnalyzer(self.har_data).analyze()

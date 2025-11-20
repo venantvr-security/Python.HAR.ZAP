@@ -72,6 +72,7 @@ Examples:
         return run_scan(args)
     elif args.command == 'idor':
         return run_idor(args)
+    return 0
 
 
 def run_scan(args):

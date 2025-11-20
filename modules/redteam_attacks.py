@@ -2,13 +2,14 @@
 Red Team Attack Modules - Business Logic & Access Control Testing
 """
 import asyncio
-import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import requests
+
+from modules.utils.masking import mask_url
 
 
 class AttackType(Enum):
@@ -65,7 +66,8 @@ class UnauthenticatedReplayAttack:
 
         return authenticated
 
-    def execute_unauth_replay(self, request: Dict) -> AttackResult:
+    @staticmethod
+    def execute_unauth_replay(request: Dict) -> AttackResult:
         """Execute request without authentication headers"""
         url = request['url']
         method = request['method']
@@ -73,7 +75,7 @@ class UnauthenticatedReplayAttack:
         clean_headers = {
             k: v for k, v in request['headers'].items()
             if k.lower() not in ['authorization', 'cookie']
-            and 'token' not in k.lower()
+               and 'token' not in k.lower()
         }
 
         clean_headers['User-Agent'] = 'Mozilla/5.0 (Security Test)'
@@ -93,9 +95,9 @@ class UnauthenticatedReplayAttack:
             original_size = request['original_response'].get('bodySize', 0)
 
             is_vulnerable = (
-                response.status_code == 200
-                and len(response.content) > 100
-                and response.status_code == original_status
+                    response.status_code == 200
+                    and len(response.content) > 100
+                    and response.status_code == original_status
             )
 
             confidence = 0.0
@@ -152,7 +154,7 @@ class UnauthenticatedReplayAttack:
                 results.append(result)
 
                 if result.vulnerable:
-                    print(f"[RedTeam] 🚨 CRITICAL: {result.url} accessible without auth!")
+                    print(f"[RedTeam] 🚨 CRITICAL: {mask_url(result.url)} accessible without auth!")
 
         self.results = results
         return results
@@ -161,6 +163,7 @@ class UnauthenticatedReplayAttack:
 class MassAssignmentFuzzer:
     """Test for mass assignment vulnerabilities by injecting privilege escalation parameters"""
 
+    # Default payloads (fallback)
     DANGEROUS_PARAMS = [
         {'role': 'admin'},
         {'is_admin': True},
@@ -174,9 +177,31 @@ class MassAssignmentFuzzer:
         {'balance': 999999}
     ]
 
-    def __init__(self, har_data: Dict):
+    def __init__(self, har_data: Dict, config: Dict = None):
         self.har_data = har_data
+        self.config = config or {}
         self.results = []
+
+        # Load payloads from config or use defaults
+        self.payloads = self._load_payloads()
+
+    def _load_payloads(self) -> List[Dict]:
+        """Load mass assignment payloads from config or use defaults"""
+        config_payloads = self.config.get('red_team_payloads', {}).get('mass_assignment', [])
+
+        if config_payloads:
+            import json
+
+            # Parse JSON strings from config
+            parsed_payloads = []
+            for payload in config_payloads:
+                try:
+                    parsed_payloads.append(json.loads(payload))
+                except Exception:  # Broad exception for robustness
+                    pass
+            return parsed_payloads if parsed_payloads else self.DANGEROUS_PARAMS
+
+        return self.DANGEROUS_PARAMS
 
     def identify_mutation_endpoints(self) -> List[Dict]:
         """Find POST/PUT/PATCH endpoints with JSON payloads"""
@@ -213,14 +238,15 @@ class MassAssignmentFuzzer:
 
         try:
             original_body = eval(request['body']) if request['body'] else {}
-        except:
+        except Exception:  # Broad exception for robustness
             import json
+
             try:
                 original_body = json.loads(request['body'])
-            except:
+            except Exception:  # Broad exception for robustness
                 return results
 
-        for dangerous_payload in self.DANGEROUS_PARAMS:
+        for dangerous_payload in self.payloads:
             poisoned_body = {**original_body, **dangerous_payload}
 
             try:
@@ -234,9 +260,9 @@ class MassAssignmentFuzzer:
                 )
 
                 is_vulnerable = (
-                    response.status_code in [200, 201, 204]
-                    and 'error' not in response.text.lower()
-                    and 'invalid' not in response.text.lower()
+                        response.status_code in [200, 201, 204]
+                        and 'error' not in response.text.lower()
+                        and 'invalid' not in response.text.lower()
                 )
 
                 if is_vulnerable:
@@ -273,7 +299,7 @@ class MassAssignmentFuzzer:
             all_results.extend(results)
 
             if results:
-                print(f"[RedTeam] ⚠️  Potential mass assignment: {endpoint['url']}")
+                print(f"[RedTeam] ⚠️  Potential mass assignment: {mask_url(endpoint['url'])}")
 
         self.results = all_results
         return all_results
@@ -282,6 +308,7 @@ class MassAssignmentFuzzer:
 class HiddenParameterDiscovery:
     """Discover hidden parameters like debug, admin, test modes"""
 
+    # Default hidden params (fallback)
     COMMON_HIDDEN_PARAMS = [
         ('debug', ['true', '1', 'yes']),
         ('admin', ['true', '1', 'yes']),
@@ -293,14 +320,36 @@ class HiddenParameterDiscovery:
         ('show_errors', ['true', '1'])
     ]
 
-    def __init__(self, har_data: Dict):
+    def __init__(self, har_data: Dict, config: Dict = None):
         self.har_data = har_data
+        self.config = config or {}
+        self.hidden_params = self._load_hidden_params()
+
+    def _load_hidden_params(self) -> List[tuple]:
+        """Load hidden parameters from config or use defaults"""
+        config_params = self.config.get('red_team_payloads', {}).get('hidden_parameters', [])
+
+        if config_params:
+            # Parse "param=value" strings from config
+            parsed_params = []
+            for param_str in config_params:
+                if '=' in param_str:
+                    param, value = param_str.split('=', 1)
+                    # Group by param name
+                    existing = next((p for p in parsed_params if p[0] == param), None)
+                    if existing:
+                        existing[1].append(value)
+                    else:
+                        parsed_params.append((param, [value]))
+            return parsed_params if parsed_params else self.COMMON_HIDDEN_PARAMS
+
+        return self.COMMON_HIDDEN_PARAMS
 
     def test_hidden_params(self, url: str, headers: Dict) -> List[AttackResult]:
         """Test URL with hidden parameter variations"""
         results = []
 
-        for param_name, values in self.COMMON_HIDDEN_PARAMS:
+        for param_name, values in self.hidden_params:
             for value in values:
                 separator = '&' if '?' in url else '?'
                 test_url = f"{url}{separator}{param_name}={value}"
@@ -335,7 +384,7 @@ class HiddenParameterDiscovery:
                             remediation="Remove debug parameters from production"
                         ))
 
-                except:
+                except Exception:  # Broad exception for robustness
                     pass
 
         return results
@@ -360,37 +409,65 @@ class HiddenParameterDiscovery:
 
 
 class RaceConditionTester:
-    """
-    Test for race conditions on critical endpoints
-    TODO: Implement async burst requests for endpoints like:
-    - /transfer (TOCTOU)
-    - /coupon (multiple redemptions)
-    - /vote (ballot stuffing)
-    """
+    """Test for race conditions on critical endpoints (TOCTOU, coupon abuse, etc.)"""
 
-    def __init__(self, har_data: Dict):
+    def __init__(self, har_data: Dict, config: Dict = None):
         self.har_data = har_data
+        self.config = config or {}
+        self.burst_count = self.config.get('race_condition_requests', 50)
 
-    async def burst_request(self, url: str, method: str, headers: Dict, body: str, count: int = 50):
-        """Send multiple simultaneous requests"""
+    async def burst_request(self, url: str, method: str, headers: Dict, body: str = None) -> List[Dict]:
+        """Send burst of N simultaneous requests"""
         import aiohttp
+        import ssl
 
-        async with aiohttp.ClientSession() as session:
+        # Disable SSL verification
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
             tasks = []
 
-            for _ in range(count):
-                if method == 'GET':
-                    task = session.get(url, headers=headers, ssl=False)
-                elif method == 'POST':
-                    task = session.post(url, headers=headers, data=body, ssl=False)
-                else:
-                    continue
+            async def make_request():
+                if method.upper() == 'GET':
+                    return await session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10))
+                elif method.upper() == 'POST':
+                    return await session.post(url, headers=headers, data=body, timeout=aiohttp.ClientTimeout(total=10))
+                elif method.upper() == 'PUT':
+                    return await session.put(url, headers=headers, data=body, timeout=aiohttp.ClientTimeout(total=10))
+                elif method.upper() == 'PATCH':
+                    return await session.patch(url, headers=headers, data=body, timeout=aiohttp.ClientTimeout(total=10))
+                return None
 
-                tasks.append(task)
+            for _ in range(self.burst_count):
+                tasks.append(make_request())
 
+            # Execute all requests concurrently
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-            return responses
+            # Collect response data
+            results = []
+            for resp in responses:
+                if isinstance(resp, Exception):
+                    results.append({'error': str(resp)})
+                else:
+                    try:
+                        content = await resp.read()
+                        results.append({
+                            'status': resp.status,
+                            'length': len(content),
+                            'headers': dict(resp.headers),
+                            'content': content[:1000]  # First 1KB
+                        })
+                    except Exception:  # Broad exception for robustness
+                        results.append({'error': 'Failed to read response'})
+                    finally:
+                        resp.close()
+
+            return results
 
     def identify_race_targets(self) -> List[Dict]:
         """Identify endpoints likely vulnerable to race conditions"""
@@ -413,11 +490,50 @@ class RaceConditionTester:
 
         return targets
 
+    def analyze_race_responses(self, responses: List[Dict]) -> Dict:
+        """Analyze burst responses for race condition indicators"""
+        status_codes = [r.get('status') for r in responses if 'status' in r]
+        lengths = [r.get('length') for r in responses if 'length' in r]
+        errors = [r for r in responses if 'error' in r]
+
+        # Detection heuristics
+        success_count = sum(1 for s in status_codes if s in [200, 201, 204])
+        unique_lengths = set(lengths)
+        length_variance = max(lengths) - min(lengths) if lengths else 0
+
+        # Indicators of vulnerability
+        vulnerability_indicators = []
+        confidence = 0.0
+
+        # Multiple successful responses (expected: only 1 should succeed)
+        if success_count > 1:
+            vulnerability_indicators.append(f"{success_count} successful responses (expected: 1)")
+            confidence += 0.4
+
+        # High response variance suggests race condition
+        if len(unique_lengths) > 5:
+            vulnerability_indicators.append(f"Response length variance: {length_variance} bytes")
+            confidence += 0.3
+
+        # Check for duplicate processing
+        if success_count > self.burst_count * 0.5:
+            vulnerability_indicators.append("Majority of requests succeeded")
+            confidence += 0.3
+
+        return {
+            'total_requests': len(responses),
+            'success_count': success_count,
+            'errors': len(errors),
+            'unique_lengths': len(unique_lengths),
+            'length_variance': length_variance,
+            'status_distribution': {str(s): status_codes.count(s) for s in set(status_codes)},
+            'vulnerable': bool(vulnerability_indicators),
+            'confidence': min(confidence, 1.0),
+            'indicators': vulnerability_indicators
+        }
+
     def run_attack(self) -> List[AttackResult]:
-        """
-        Execute race condition tests
-        TODO: Full implementation requires careful timing analysis
-        """
+        """Execute race condition tests using async burst requests"""
         print("[RedTeam] Identifying race condition targets...")
         targets = self.identify_race_targets()
 
@@ -425,12 +541,51 @@ class RaceConditionTester:
             print("[RedTeam] No obvious race condition targets found")
             return []
 
-        print(f"[RedTeam] TODO: Implement burst testing for {len(targets)} potential targets")
-        print("[RedTeam] Manual testing recommended for:")
-        for target in targets:
-            print(f"  - {target['method']} {target['url']}")
+        print(f"[RedTeam] Testing {len(targets)} potential race condition targets...")
+        print(f"[RedTeam] Burst size: {self.burst_count} concurrent requests per endpoint")
 
-        return []
+        results = []
+
+        for target in targets:
+            try:
+                print(f"[RedTeam] Burst testing: {target['method']} {mask_url(target['url'])}")
+
+                # Run async burst
+                responses = asyncio.run(
+                    self.burst_request(
+                        target['url'],
+                        target['method'],
+                        target['headers'],
+                        target.get('body')
+                    )
+                )
+
+                # Analyze responses
+                analysis = self.analyze_race_responses(responses)
+
+                if analysis['vulnerable']:
+                    result = AttackResult(
+                        attack_type=AttackType.RACE_CONDITION,
+                        url=target['url'],
+                        method=target['method'],
+                        vulnerable=True,
+                        confidence=analysis['confidence'],
+                        evidence={
+                            'burst_size': self.burst_count,
+                            'success_count': analysis['success_count'],
+                            'status_distribution': analysis['status_distribution'],
+                            'indicators': analysis['indicators']
+                        },
+                        description=f"Race condition detected: {', '.join(analysis['indicators'])}",
+                        remediation="Implement proper locking/semaphores and idempotency checks"
+                    )
+                    results.append(result)
+                    print(f"[RedTeam] ⚠️  Possible race condition vulnerability detected!")
+
+            except Exception as e:
+                print(f"[RedTeam] Error testing {mask_url(target['url'])}: {e}")
+
+        return results
 
 
 class RedTeamOrchestrator:
@@ -443,24 +598,27 @@ class RedTeamOrchestrator:
 
     def run_all_attacks(self) -> Dict[str, List[AttackResult]]:
         """Execute all red team attack modules"""
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("RED TEAM ATTACK SIMULATION")
-        print("="*80)
+        print("=" * 80)
 
         self.results['unauth_replay'] = UnauthenticatedReplayAttack(
             self.har_data
         ).run_attack()
 
         self.results['mass_assignment'] = MassAssignmentFuzzer(
-            self.har_data
+            self.har_data,
+            self.config
         ).run_attack()
 
         self.results['hidden_params'] = HiddenParameterDiscovery(
-            self.har_data
+            self.har_data,
+            self.config
         ).run_attack()
 
         self.results['race_condition'] = RaceConditionTester(
-            self.har_data
+            self.har_data,
+            self.config
         ).run_attack()
 
         return self.results

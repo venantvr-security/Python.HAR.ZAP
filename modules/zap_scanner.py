@@ -105,7 +105,8 @@ class ZAPScanner:
 
         return scan_results
 
-    def _get_policy_for_target(self, target: Dict) -> str:
+    @staticmethod
+    def _get_policy_for_target(target: Dict) -> str:
         params = target.get('params', [])
 
         if any('sql' in p.lower() or 'id' in p.lower() for p in params):
@@ -158,7 +159,7 @@ class ZAPScanner:
                         id=scanner_id,
                         alertthreshold='OFF'
                     )
-                except:
+                except Exception:  # Broad exception for robustness
                     pass
 
         except Exception as e:
@@ -176,5 +177,5 @@ class ZAPScanner:
         print("[ZAP] Shutting down ZAP")
         try:
             self.zap.core.shutdown()
-        except:
+        except Exception:  # Broad exception for robustness
             pass

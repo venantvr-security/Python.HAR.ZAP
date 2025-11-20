@@ -51,7 +51,8 @@ class AcceptanceEngine:
                 'message': f'Unknown criterion type: {ctype}'
             }
 
-    def _check_max_high(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_max_high(criterion: Dict, results: Dict) -> Dict:
         """Check maximum high severity alerts"""
         threshold = criterion.get('threshold', 0)
         alerts = results.get('zap_alerts', [])
@@ -71,7 +72,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _check_max_medium(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_max_medium(criterion: Dict, results: Dict) -> Dict:
         """Check maximum medium severity alerts"""
         threshold = criterion.get('threshold', 0)
         alerts = results.get('zap_alerts', [])
@@ -90,7 +92,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _check_no_idor(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_no_idor(criterion: Dict, results: Dict) -> Dict:
         """Check for IDOR vulnerabilities"""
         idor_results = results.get('idor_results', [])
         vulnerable = [r for r in idor_results if r.status == IDORStatus.VULNERABLE]
@@ -108,7 +111,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _check_clean_url(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_clean_url(criterion: Dict, results: Dict) -> Dict:
         """Check if specific URL pattern has no alerts"""
         pattern = criterion.get('pattern', '')
         alerts = results.get('zap_alerts', [])
@@ -133,7 +137,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _check_max_total(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_max_total(criterion: Dict, results: Dict) -> Dict:
         """Check maximum total alerts"""
         threshold = criterion.get('threshold', 0)
         alerts = results.get('zap_alerts', [])
@@ -151,7 +156,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _check_no_sql_injection(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_no_sql_injection(criterion: Dict, results: Dict) -> Dict:
         """Check for SQL injection vulnerabilities"""
         alerts = results.get('zap_alerts', [])
         sql_alerts = [
@@ -173,7 +179,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _check_no_xss(self, criterion: Dict, results: Dict) -> Dict:
+    @staticmethod
+    def _check_no_xss(criterion: Dict, results: Dict) -> Dict:
         """Check for XSS vulnerabilities"""
         alerts = results.get('zap_alerts', [])
         xss_alerts = [
@@ -195,7 +202,8 @@ class AcceptanceEngine:
             }
         }
 
-    def _generate_summary(self, results: List[Dict]) -> str:
+    @staticmethod
+    def _generate_summary(results: List[Dict]) -> str:
         """Generate human-readable summary"""
         total = len(results)
         passed = len([r for r in results if r['passed']])
@@ -208,7 +216,8 @@ class AcceptanceEngine:
 
         return summary
 
-    def export_junit_xml(self, evaluation: Dict, output_path: str):
+    @staticmethod
+    def export_junit_xml(evaluation: Dict, output_path: str):
         """Export results as JUnit XML for CI/CD integration"""
         import xml.etree.ElementTree as ET
 
@@ -282,7 +291,8 @@ class AcceptanceEngine:
         with open(output_path, 'w') as f:
             json.dump(sarif, f, indent=2)
 
-    def _map_risk_to_sarif_level(self, risk: str) -> str:
+    @staticmethod
+    def _map_risk_to_sarif_level(risk: str) -> str:
         """Map ZAP risk levels to SARIF severity levels"""
         mapping = {
             'High': 'error',

@@ -31,3 +31,31 @@ zap_image: "ghcr.io/zaproxy/zaproxy:stable"
 scan_fuzzable_urls: true
 scan_api_endpoints: true
 max_scan_time: 300
+
+# Red Team attack payloads
+red_team_payloads:
+  mass_assignment:
+    - '{"role": "admin"}'
+    - '{"is_admin": true}'
+    - '{"permissions": ["*"]}'
+    - '{"admin": 1}'
+    - '{"role": "administrator"}'
+    - '{"permission": "write"}'
+    - '{"is_superuser": true}'
+    - '{"account_type": "premium"}'
+    - '{"credits": 999999}'
+    - '{"balance": 999999}'
+  hidden_parameters:
+    - "debug=true"
+    - "test=1"
+    - "admin=true"
+    - "debug=1"
+    - "test=true"
+    - "internal=true"
+    - "dev=true"
+    - "trace=true"
+    - "verbose=1"
+    - "show_errors=true"
+
+# Race condition test configuration
+race_condition_requests: 50
