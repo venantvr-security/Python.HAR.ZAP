@@ -102,10 +102,11 @@ def run_ajax_spider(self, target_url: str, max_duration: int = 10) -> Dict:
 - Click handling: enabled
 
 **Performance:**
-| App Type | Traditional Spider | Ajax Spider |
-|----------|-------------------|-------------|
-| Static site | 50 URLs (10s) | 50 URLs (45s) |
-| React SPA | 5 URLs (5s) | **120 URLs (90s)** |
+
+| App Type    | Traditional Spider | Ajax Spider    |
+|-------------|--------------------|----------------|
+| Static site | 50 URLs (10s)      | 50 URLs (45s)  |
+| React SPA   | 5 URLs (5s)        | 120 URLs (90s) |
 
 ### 3. ZAP Native Passive Scanner (`zap_passive_scanner.py`)
 
