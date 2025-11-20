@@ -123,10 +123,11 @@ zap.ajaxSpider.set_option_click_default_elems(True)
 - AJAX-loaded content
 
 **Performance Comparison:**
-| App Type | Traditional Spider | Ajax Spider |
-|----------|-------------------|-------------|
-| Static blog | 50 URLs, 10s | 50 URLs, 45s |
-| SPA dashboard | 5 URLs, 5s | 120 URLs, 90s |
+
+| App Type      | Traditional Spider | Ajax Spider   |
+|---------------|--------------------|---------------|
+| Static blog   | 50 URLs, 10s       | 50 URLs, 45s  |
+| SPA dashboard | 5 URLs, 5s         | 120 URLs, 90s |
 
 ## Passive Scanning
 
