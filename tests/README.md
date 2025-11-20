@@ -11,7 +11,7 @@ tests/
 ## Installation
 
 ```bash
-pip install -r requirements.in
+pip install -r requirements.txt
 ```
 
 ## Exécution des tests
@@ -193,7 +193,7 @@ Configuration recommandée pour pipeline :
 ```yaml
 test:
   script:
-    - pip install -r requirements.in
+    - pip install -r requirements.txt
     - pytest --cov=modules --cov-report=xml --cov-fail-under=85
     - behave tests/features/
   artifacts:
