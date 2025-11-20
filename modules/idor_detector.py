@@ -41,7 +41,8 @@ class IDORDetector:
         self.results = []
         self.max_workers = self.config.get('max_workers', 5)
 
-    def extract_auth_tokens(self, har_data: Dict) -> Dict[str, str]:
+    @staticmethod
+    def extract_auth_tokens(har_data: Dict) -> Dict[str, str]:
         """Extract authentication tokens from HAR entries"""
         auth_headers = {}
 
@@ -299,16 +300,19 @@ class IDORDetector:
         test = self.execute_cross_user_test(variant, auth_b)
         return self.analyze_responses(baseline, test, variant)
 
-    def _is_json(self, response: requests.Response) -> bool:
+    @staticmethod
+    def _is_json(response: requests.Response) -> bool:
         """Check if response is JSON"""
         content_type = response.headers.get('Content-Type', '')
         return 'application/json' in content_type
 
-    def _calculate_similarity(self, text1: str, text2: str) -> float:
+    @staticmethod
+    def _calculate_similarity(text1: str, text2: str) -> float:
         """Calculate similarity ratio between two texts"""
         return difflib.SequenceMatcher(None, text1, text2).ratio()
 
-    def _generate_diff_html(self, content1: str, content2: str) -> str:
+    @staticmethod
+    def _generate_diff_html(content1: str, content2: str) -> str:
         """Generate HTML diff visualization"""
         diff = difflib.HtmlDiff()
         return diff.make_file(
@@ -318,7 +322,8 @@ class IDORDetector:
             'Test (User B → Resource A)'
         )
 
-    def generate_curl_commands(self, result: IDORTestResult, auth_b: Dict) -> str:
+    @staticmethod
+    def generate_curl_commands(result: IDORTestResult, auth_b: Dict) -> str:
         """Generate cURL command for manual reproduction"""
         headers = ' '.join([f"-H '{k}: {v}'" for k, v in auth_b.items()])
         return f"curl -X {result.method} {headers} '{result.url}'"

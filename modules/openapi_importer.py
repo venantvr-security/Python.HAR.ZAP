@@ -29,7 +29,7 @@ class OpenAPIImporter:
             else:
                 try:
                     self.spec = response.json()
-                except:
+                except Exception:  # Broad exception for robustness
                     self.spec = yaml.safe_load(response.text)
 
             return self.spec
@@ -112,7 +112,8 @@ class OpenAPIImporter:
 
         return ''
 
-    def _extract_parameters(self, operation: Dict) -> List[Dict]:
+    @staticmethod
+    def _extract_parameters(operation: Dict) -> List[Dict]:
         """Extract parameters from operation"""
         params = []
 
@@ -127,7 +128,8 @@ class OpenAPIImporter:
 
         return params
 
-    def _extract_request_body(self, operation: Dict) -> Optional[Dict]:
+    @staticmethod
+    def _extract_request_body(operation: Dict) -> Optional[Dict]:
         """Extract request body schema"""
         request_body = operation.get('requestBody')
 
@@ -227,7 +229,8 @@ class OpenAPIImporter:
 
         return requests_list
 
-    def _generate_sample_value(self, param: Dict) -> str:
+    @staticmethod
+    def _generate_sample_value(param: Dict) -> str:
         """Generate sample value for parameter"""
         param_type = param.get('type', 'string')
 

@@ -240,7 +240,7 @@ class AdvancedZAPConfig:
                 return self.zap.context.context(context_name)['id']
             else:
                 return self.zap.context.new_context(context_name)
-        except:
+        except Exception:  # Broad exception for robustness
             return '1'
 
     def _create_user(self, context_id: str, username: str, password: str):

@@ -1,6 +1,9 @@
 import json
+import os
 from typing import List, Dict, Optional
 from urllib.parse import urlparse, parse_qs
+
+from modules.token_extractor import TokenExtractor
 
 
 class HARAnalyzer:
@@ -17,6 +20,9 @@ class HARAnalyzer:
         '.mp4', '.mp3', '.pdf', '.zip'
     }
 
+    MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+    MAX_ENTRIES = 10000
+
     def __init__(self, har_path: str, config: Dict):
         self.har_path = har_path
         self.config = config
@@ -26,16 +32,26 @@ class HARAnalyzer:
             'api_endpoints': [],
             'fuzzable_urls': [],
             'auth_headers': {},
-            'domains': set()
+            'domains': set(),
+            'extracted_tokens': {},
+            'fuzzing_recommendations': []
         }
 
     def load_har(self) -> Dict:
+        file_size = os.path.getsize(self.har_path)
+        if file_size > self.MAX_FILE_SIZE:
+            raise ValueError(f"HAR file size ({file_size} bytes) exceeds the limit of {self.MAX_FILE_SIZE} bytes.")
+
         with open(self.har_path, 'r', encoding='utf-8') as f:
             return json.load(f)
 
     def analyze(self) -> Dict:
         har_data = self.load_har()
         self.entries = har_data.get('log', {}).get('entries', [])
+
+        if len(self.entries) > self.MAX_ENTRIES:
+            print(f"Warning: HAR file contains {len(self.entries)} entries, which is more than the limit of {self.MAX_ENTRIES}. Processing will be truncated.")
+            self.entries = self.entries[:self.MAX_ENTRIES]
 
         for entry in self.entries:
             request = entry.get('request', {})
@@ -75,7 +91,28 @@ class HARAnalyzer:
             if auth_data:
                 self.parsed_data['auth_headers'].update(auth_data)
 
+        # Extract tokens for fuzzing
+        self._extract_tokens_for_fuzzing(har_data)
+
         return self.parsed_data
+
+    def _extract_tokens_for_fuzzing(self, har_data: Dict):
+        """Extract tokens and generate fuzzing wordlists"""
+        try:
+            extractor = TokenExtractor(har_data)
+            self.parsed_data['extracted_tokens'] = extractor.extract_all()
+            self.parsed_data['fuzzing_recommendations'] = extractor.get_fuzzing_recommendations()
+
+            total_tokens = sum(
+                len(v) if isinstance(v, list) else sum(len(vals) for vals in v.values())
+                for v in self.parsed_data['extracted_tokens'].values()
+            )
+            print(f"[HARAnalyzer] Extracted {total_tokens} unique tokens for fuzzing")
+
+        except Exception as e:
+            print(f"[HARAnalyzer] Warning: Token extraction failed: {e}")
+            self.parsed_data['extracted_tokens'] = {}
+            self.parsed_data['fuzzing_recommendations'] = []
 
     def _should_process(self, request: Dict) -> bool:
         url = request.get('url', '')
@@ -101,7 +138,8 @@ class HARAnalyzer:
         path_lower = parsed.path.lower()
         return any(path_lower.endswith(ext) for ext in self.STATIC_EXTENSIONS)
 
-    def _is_api_endpoint(self, url: str, headers: Dict) -> bool:
+    @staticmethod
+    def _is_api_endpoint(url: str, headers: Dict) -> bool:
         content_type = headers.get('Content-Type', '').lower()
         if 'application/json' in content_type or 'application/xml' in content_type:
             return True
@@ -131,7 +169,7 @@ class HARAnalyzer:
                         for key in body.keys():
                             if self._is_suspicious_param(key):
                                 fuzzable.append(f"body.{key}")
-                except:
+                except Exception:  # Broad exception for robustness
                     params = parse_qs(text)
                     for param in params.keys():
                         if self._is_suspicious_param(param):
@@ -143,11 +181,13 @@ class HARAnalyzer:
         param_lower = param.lower()
         return any(suspect in param_lower for suspect in self.SUSPICIOUS_PARAMS)
 
-    def _get_request_body(self, request: Dict) -> Optional[str]:
+    @staticmethod
+    def _get_request_body(request: Dict) -> Optional[str]:
         post_data = request.get('postData', {})
         return post_data.get('text') if post_data else None
 
-    def _extract_auth(self, headers: Dict) -> Dict:
+    @staticmethod
+    def _extract_auth(headers: Dict) -> Dict:
         auth_data = {}
 
         if 'Authorization' in headers:
