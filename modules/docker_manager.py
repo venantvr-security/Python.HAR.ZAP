@@ -15,7 +15,8 @@ class DockerZAPManager:
         self.client = docker.from_env()
         # noinspection PyUnresolvedReferences
         self.container: Optional[docker.models.containers.Container] = None
-        self.api_key = secrets.token_hex(16)
+        # Generate a random API key for ZAP authentication
+        self.api_key = secrets.token_hex(16)  # nosec: dynamic generation, not hardcoded
         self.zap_port = config.get('zap_port', self.DEFAULT_PORT)
         self.image = config.get('zap_image', self.DEFAULT_IMAGE)
 
