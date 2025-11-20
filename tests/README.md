@@ -4,21 +4,20 @@ Suite de tests complète pour la plateforme DAST Python.HAR.ZAP.
 
 ## Structure
 
-```
-tests/
-├── unit/                          # Tests unitaires
-│   ├── test_masking.py           # Tests du module de masquage
-│   └── test_redteam_attacks.py   # Tests des attaques Red Team
-├── features/                      # Tests BDD (Gherkin)
-│   ├── redteam_payloads.feature  # Scénarios payloads configurables
-│   ├── race_condition.feature    # Scénarios race conditions
-│   ├── secrets_masking.feature   # Scénarios masquage secrets
-│   └── steps/                    # Implémentations step definitions
-│       ├── redteam_steps.py
-│       ├── race_condition_steps.py
-│       └── masking_steps.py
-└── README.md                      # Ce fichier
-```
+**tests/** - Test suite root
+
+- **unit/** - Unit tests
+    - test_masking.py - Masking module tests
+    - test_redteam_attacks.py - Red Team attack tests
+- **features/** - BDD tests (Gherkin)
+    - redteam_payloads.feature - Configurable payload scenarios
+    - race_condition.feature - Race condition scenarios
+    - secrets_masking.feature - Secrets masking scenarios
+    - **steps/** - Step definitions implementations
+        - redteam_steps.py
+        - race_condition_steps.py
+        - masking_steps.py
+- README.md - This file
 
 ## Installation
 

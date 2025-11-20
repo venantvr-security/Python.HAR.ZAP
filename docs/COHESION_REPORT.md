@@ -10,13 +10,13 @@ Project is **architecturally cohesive** with clear separation of concerns and un
 
 ## Tests: 88/88 PASSING
 
-```
-✓ masking: 38 tests (95% coverage)
-✓ redteam_attacks: 28 tests (74% coverage)  
-✓ token_extractor: 11 tests (89% coverage)
-✓ har_preprocessor: 10 tests (68% coverage)
-✓ Overall: 22% coverage
-```
+All 88 tests passing with the following breakdown:
+
+- masking: 38 tests (95% coverage)
+- redteam_attacks: 28 tests (74% coverage)
+- token_extractor: 11 tests (89% coverage)
+- har_preprocessor: 10 tests (68% coverage)
+- Overall project coverage: 22%
 
 ## Module Integration Matrix
 
@@ -36,19 +36,15 @@ Project is **architecturally cohesive** with clear separation of concerns and un
 
 ### Unified Pipeline (NEW)
 
-```
-HAR → HARPreprocessor → preprocessed.json → All modules
-```
+**Flow:** HAR file → HARPreprocessor → preprocessed.json → All modules
 
-**Status**: ✓ Implemented in UI (tab 2)
+**Status:** Implemented in UI (tab 2)
 
 ### Legacy Pipeline (MAINTAINED)
 
-```
-HAR → HARAnalyzer → Individual parsers
-```
+**Flow:** HAR file → HARAnalyzer → Individual parsers
 
-**Status**: ✓ Still functional for backward compatibility
+**Status:** Still functional for backward compatibility
 
 ## UI Coherence
 
@@ -69,21 +65,20 @@ HAR → HARAnalyzer → Individual parsers
 
 ## Import Hygiene
 
-No circular imports detected.
-All new modules importable without errors.
+No circular imports detected. All new modules importable without errors:
 
-```python
-✓ from modules.har_preprocessor import HARPreprocessor
-✓ from modules.payload_analyzer import PayloadAnalyzer
-✓ from modules.payload_reconstructor import PayloadReconstructor
-✓ from modules.dictionary_manager import DictionaryManager
-```
+- from modules.har_preprocessor import HARPreprocessor
+- from modules.payload_analyzer import PayloadAnalyzer
+- from modules.payload_reconstructor import PayloadReconstructor
+- from modules.dictionary_manager import DictionaryManager
 
 ## Configuration Consistency
 
-- config.yaml: ✓ Used by orchestrator, cli
-- Filters: ✓ Consistent across preprocessor & UI
-- Dictionaries: ✓ Base structure defined
+**Configuration files:**
+
+- config.yaml - Used by orchestrator and cli
+- Filters - Consistent across preprocessor and UI
+- Dictionaries - Base structure defined and documented
 
 ## Potential Issues
 

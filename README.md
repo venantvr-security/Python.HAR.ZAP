@@ -327,30 +327,34 @@ config_mgr.configure_authentication({
 
 ## Architecture
 
-```
-app.py                          # Streamlit web interface (7 tabs)
-cli.py                          # CI/CD CLI
-orchestrator.py                 # Legacy CLI
-modules/
-  ├── har_analyzer.py           # HAR parsing & intelligence
-  ├── docker_manager.py         # ZAP container lifecycle
-  ├── zap_scanner.py            # Scan orchestration
-  ├── idor_detector.py          # IDOR testing engine (ThreadPoolExecutor)
-  ├── redteam_attacks.py        # Offensive security attacks
-  │   ├── UnauthenticatedReplayAttack
-  │   ├── MassAssignmentFuzzer
-  │   ├── HiddenParameterDiscovery
-  │   └── RaceConditionTester
-  ├── passive_analysis.py       # Non-invasive security checks
-  │   ├── SecurityHeadersAnalyzer
-  │   ├── SensitiveDataScanner (10+ regex patterns)
-  │   └── TokenEntropyAnalyzer (Shannon entropy)
-  ├── redteam_ui_helpers.py     # Streamlit result renderers
-  ├── acceptance_engine.py      # Criteria evaluation + SARIF/JUnit export
-  ├── reporter.py               # Multi-format reporting
-  ├── openapi_importer.py       # OpenAPI/Swagger parser
-  └── advanced_zap_config.py    # Auth & context config
-```
+**Project Structure:**
+
+**Entry Points:**
+
+- app.py - Streamlit web interface (9 tabs)
+- cli.py - CI/CD CLI
+- orchestrator.py - Legacy CLI
+
+**modules/** - Core functionality
+
+- **har_analyzer.py** - HAR parsing and intelligence
+- **docker_manager.py** - ZAP container lifecycle management
+- **zap_scanner.py** - Scan orchestration
+- **idor_detector.py** - IDOR testing engine with ThreadPoolExecutor
+- **redteam_attacks.py** - Offensive security attacks
+    - UnauthenticatedReplayAttack
+    - MassAssignmentFuzzer
+    - HiddenParameterDiscovery
+    - RaceConditionTester
+- **passive_analysis.py** - Non-invasive security checks
+    - SecurityHeadersAnalyzer
+    - SensitiveDataScanner (10+ regex patterns)
+    - TokenEntropyAnalyzer (Shannon entropy)
+- **redteam_ui_helpers.py** - Streamlit result renderers
+- **acceptance_engine.py** - Criteria evaluation with SARIF/JUnit export
+- **reporter.py** - Multi-format reporting
+- **openapi_importer.py** - OpenAPI/Swagger parser
+- **advanced_zap_config.py** - Authentication and context configuration
 
 ## Technical Implementation
 
