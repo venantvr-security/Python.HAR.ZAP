@@ -5,9 +5,12 @@ from pathlib import Path
 
 import yaml
 
+from modules.adaptive_tuner import AdaptiveThresholdTuner
 from modules.docker_manager import DockerZAPManager
 from modules.har_analyzer import HARAnalyzer
+from modules.meta_analyzer import MetaAnalyzer
 from modules.reporter import Reporter
+from modules.zap_passive_scanner import ZAPPassiveScanner
 from modules.zap_scanner import ZAPScanner
 
 
@@ -112,24 +115,111 @@ def main():
                 'port': 8080
             }
 
-        print("\n[3/5] Configuring ZAP scanner...")
+        print("\n[3/9] Configuring ZAP scanner...")
         scanner = ZAPScanner(zap_config, har_data, config)
         scanner.configure_context()
         scanner.configure_scan_policies()
+
+        # Get base target URL
+        base_target = har_data['urls'][0] if har_data['urls'] else None
+        if not base_target:
+            print("Error: No base target URL")
+            sys.exit(1)
+
+        print("\n[4/9] Platform fingerprinting (Arachni-inspired)...")
+        fingerprint = scanner.run_platform_fingerprinting(base_target)
+        print(f"[Fingerprint] Detected {fingerprint['scanner_count']} technology categories")
+
+        print("\n[5/9] Discovery phase (Spider + Ajax Spider)...")
         scanner.populate_site_tree()
 
-        print("\n[4/5] Executing targeted scans...")
-        scan_results = scanner.execute_targeted_scans()
-        print(f"[Scan] Completed {len(scan_results)} scan scenarios")
+        # Traditional spider
+        spider_results = scanner.run_traditional_spider(base_target, max_duration=5)
+        print(f"[Spider] Found {len(spider_results['discovered_urls'])} URLs")
 
-        print("\n[5/5] Generating reports...")
-        alerts = scanner.get_alerts()
+        # Ajax spider for JS-heavy apps
+        ajax_results = scanner.run_ajax_spider(base_target, max_duration=5)
+        print(f"[Ajax Spider] Found {len(ajax_results['discovered_urls'])} URLs")
+
+        print("\n[6/9] Passive scanning (ZAP native + custom)...")
+        passive_scanner = ZAPPassiveScanner(scanner.zap, har_data)
+        passive_issues = passive_scanner.scan_full(base_target)
+        print(f"[Passive] Found {len(passive_issues)} issues")
+
+        print("\n[7/9] Adaptive learning (Arachni trainer)...")
+        adaptive_tuner = AdaptiveThresholdTuner(scanner.zap)
+        adaptive_tuner.set_detected_technologies(fingerprint['technologies'])
+
+        # Get initial alerts for tuning
+        initial_alerts = scanner.get_alerts()
+        adaptive_tuner.analyze_alerts(initial_alerts)
+        adjusted = adaptive_tuner.adjust_scanners()
+        print(f"[Adaptive] Adjusted {adjusted} scanners based on FP analysis")
+
+        print("\n[8/9] Active scanning (targeted + custom scripts)...")
+        # Load custom ZAP scripts
+        try:
+            script_dir = Path(__file__).parent / 'scripts' / 'active'
+            if script_dir.exists():
+                for script_file in script_dir.glob('*.js'):
+                    scanner.zap.script.load(
+                        scriptname=script_file.stem,
+                        scripttype='active',
+                        scriptengine='ECMAScript',
+                        filename=str(script_file)
+                    )
+                    scanner.zap.script.enable(script_file.stem)
+                    print(f"[Scripts] Loaded {script_file.name}")
+        except Exception as e:
+            print(f"[Scripts] Warning: Could not load scripts: {e}")
+
+        scan_results = scanner.execute_targeted_scans()
+        print(f"[Active Scan] Completed {len(scan_results)} scan scenarios")
+
+        print("\n[9/9] Meta-analysis & reporting...")
+        all_alerts = scanner.get_alerts()
+
+        # Meta-analysis (Arachni meta-plugins)
+        meta_analyzer = MetaAnalyzer(all_alerts)
+        meta_report = meta_analyzer.generate_meta_report()
+
+        # Deduplicate alerts
+        deduplicated_alerts = meta_analyzer.deduplicate_alerts()
 
         reporter = Reporter(args.output)
-        reporter.generate_console_report(alerts)
-        reporter.save_json_report(alerts, analyzer.get_summary())
+        reporter.generate_console_report(deduplicated_alerts)
+
+        # Enhanced report with Arachni-inspired features
+        enhanced_summary = {
+            'har_analysis': analyzer.get_summary(),
+            'platform_fingerprint': fingerprint,
+            'discovery': {
+                'spider_urls': len(spider_results['discovered_urls']),
+                'ajax_urls': len(ajax_results['discovered_urls'])
+            },
+            'passive_scan': {
+                'issues_count': len(passive_issues),
+                'zap_native': len([i for i in passive_issues if i.zap_plugin_id]),
+                'custom': len([i for i in passive_issues if not i.zap_plugin_id])
+            },
+            'adaptive_learning': adaptive_tuner.get_summary(),
+            'meta_analysis': meta_report
+        }
+
+        reporter.save_json_report(deduplicated_alerts, enhanced_summary)
         reporter.save_html_report(scanner.zap, f"{args.output}/report_{reporter.timestamp}.html")
-        reporter.save_critical_findings(alerts)
+        reporter.save_critical_findings(deduplicated_alerts)
+
+        # Save meta-analysis separately
+        import json
+
+        with open(f"{args.output}/meta_analysis_{reporter.timestamp}.json", 'w') as f:
+            json.dump(meta_report, f, indent=2)
+
+        print(f"\n[Reports] Saved to {args.output}/")
+        print(f"[Reports]   - Main report: report_{reporter.timestamp}.html")
+        print(f"[Reports]   - Meta-analysis: meta_analysis_{reporter.timestamp}.json")
+        print(f"[Reports]   - Critical findings: critical_findings_{reporter.timestamp}.json")
 
         print("\n" + "=" * 80)
         print("SCAN COMPLETE")

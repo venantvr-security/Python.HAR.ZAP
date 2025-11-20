@@ -8,6 +8,7 @@ from typing import Dict, List
 from zapv2 import ZAPv2
 
 
+# noinspection PyUnresolvedReferences
 class ZAPFuzzer:
     """Advanced fuzzing with ZAP using extracted tokens"""
 
