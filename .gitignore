@@ -16,6 +16,7 @@ ENV/
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
@@ -31,6 +32,7 @@ wordlists/
 *.har
 *.log
 .env
+CLAUDE.md
 
 # OS
 .DS_Store
