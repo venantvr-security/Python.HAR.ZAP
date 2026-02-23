@@ -419,3 +419,7 @@ PRs welcome. Focus areas:
 ## Disclaimer
 
 **For authorized security testing only.** Unauthorized penetration testing is illegal. Always obtain written permission before testing systems you don't own.
+
+## Stack
+
+[![Stack](https://skillicons.dev/icons?i=py,sklearn,redis,docker,grafana,prometheus,graphql,dotnet&theme=dark)](https://skillicons.dev)
