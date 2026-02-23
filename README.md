@@ -422,4 +422,4 @@ PRs welcome. Focus areas:
 
 ## Stack
 
-[![Stack](https://skillicons.dev/icons?i=py,sklearn,redis,docker,grafana,prometheus,graphql,dotnet&theme=dark)](https://skillicons.dev)
+[![Stack](https://skillicons.dev/icons?i=py,sklearn,redis,docker,grafana,prometheus&theme=dark)](https://skillicons.dev)
