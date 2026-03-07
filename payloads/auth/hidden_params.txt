@@ -1,0 +1,70 @@
+# Hidden Parameters Discovery
+
+# Debug/Dev mode
+debug=true
+debug=1
+_debug=1
+_debug=true
+test=1
+test=true
+dev=true
+dev=1
+staging=true
+beta=true
+canary=true
+
+# Admin access
+admin=true
+admin=1
+is_admin=true
+isAdmin=true
+access=admin
+role=admin
+sudo=true
+root=true
+
+# Feature flags
+feature_flags=all
+features=all
+ff=all
+preview=true
+experimental=true
+
+# Bypass controls
+bypass_auth=true
+bypass=true
+skip_validation=true
+skip_auth=true
+no_auth=true
+noauth=1
+
+# Output format
+raw=true
+format=debug
+output=debug
+log_level=debug
+verbose=1
+verbose=true
+trace=true
+
+# Profiling
+profiler=true
+profile=true
+timing=true
+benchmark=true
+
+# Internal headers as params
+x-debug=true
+x-forwarded-admin=true
+x-request-id=admin
+x-real-ip=127.0.0.1
+x-original-url=/admin
+x-rewrite-url=/admin
+x-custom-ip-authorization=127.0.0.1
+
+# Error display
+show_errors=true
+showErrors=true
+display_errors=1
+error_reporting=E_ALL
+stack_trace=true

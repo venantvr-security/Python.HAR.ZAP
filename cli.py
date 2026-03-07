@@ -1,66 +1,131 @@
 #!/usr/bin/env python3
 """
-CI/CD-friendly CLI for DAST Security Platform
-Supports fail-fast mode and multiple output formats
+HAR-ZAP: Professional DAST Security Platform
+CI/CD-friendly CLI with fail-fast mode, incremental scanning, and multi-protocol support.
 """
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
+from modules.config_loader import load_config, get_zap_config, get_scan_config
 from modules.acceptance_engine import AcceptanceEngine
 from modules.docker_manager import DockerZAPManager
 from modules.har_analyzer import HARAnalyzer
 from modules.idor_detector import IDORDetector
 from modules.reporter import Reporter
 from modules.zap_scanner import ZAPScanner
+from modules.incremental_scanner import IncrementalScanner
+from modules.graphql_scanner import GraphQLScanner
+from modules.websocket_scanner import WebSocketScanner
+from modules.owasp_mapper import OWASPMapper
+from modules.notifications import NotificationManager, NotificationType
+from modules.utils import get_logger
+
+logger = get_logger("cli")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='DAST Security Platform - CI/CD CLI',
+        description='HAR-ZAP: Professional DAST Security Platform',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic scan with acceptance criteria
-  %(prog)s scan traffic.har --max-high 0 --max-medium 5
+  # Full scan with OWASP compliance
+  %(prog)s scan traffic.har --owasp --fail-fast --max-high 0
 
-  # IDOR detection
-  %(prog)s idor --session-a user1.har --session-b user2.har
+  # Incremental scan (skip already-scanned requests)
+  %(prog)s scan traffic.har --incremental
 
-  # Export SARIF for GitHub Security
-  %(prog)s scan traffic.har --format sarif --output results.sarif
+  # GraphQL security testing
+  %(prog)s graphql api.har --introspection --batch-test
 
-  # Fail-fast mode (exit code 1 if criteria not met)
-  %(prog)s scan traffic.har --fail-fast --max-high 0
+  # WebSocket security testing
+  %(prog)s websocket traffic.har --cswsh
+
+  # IDOR detection with notifications
+  %(prog)s idor --session-a user1.har --session-b user2.har --webhook slack
+
+  # Export multiple formats
+  %(prog)s scan traffic.har --format json,sarif,html --output ./reports
+
+  # Use existing ZAP instance
+  %(prog)s scan traffic.har --no-docker --zap-url http://localhost:8080
         """
     )
 
-    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('--version', action='version', version='HAR-ZAP 2.0.0')
 
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+
+    # === SCAN COMMAND ===
     scan_parser = subparsers.add_parser('scan', help='Run ZAP security scan')
     scan_parser.add_argument('har_file', help='HAR file to scan')
     scan_parser.add_argument('-c', '--config', help='Config YAML file')
     scan_parser.add_argument('-o', '--output', default='./output', help='Output directory')
-    scan_parser.add_argument('--format', choices=['json', 'html', 'sarif', 'junit'],
-                             default='json', help='Output format')
+    scan_parser.add_argument('--format', default='json',
+                             help='Output formats (comma-separated): json,html,sarif,junit')
     scan_parser.add_argument('--max-high', type=int, help='Max high severity alerts')
     scan_parser.add_argument('--max-medium', type=int, help='Max medium severity alerts')
     scan_parser.add_argument('--fail-fast', action='store_true',
-                             help='Exit with code 1 if acceptance criteria fail')
+                             help='Exit code 1 if criteria fail')
+    scan_parser.add_argument('--incremental', action='store_true',
+                             help='Skip already-scanned requests (uses local cache)')
+    scan_parser.add_argument('--owasp', action='store_true',
+                             help='Include OWASP Top 10 compliance report')
+    scan_parser.add_argument('--graphql', action='store_true',
+                             help='Enable GraphQL endpoint scanning')
+    scan_parser.add_argument('--websocket', action='store_true',
+                             help='Enable WebSocket endpoint scanning')
     scan_parser.add_argument('--no-docker', action='store_true',
                              help='Use existing ZAP instance')
     scan_parser.add_argument('--zap-url', default='http://localhost:8080',
                              help='ZAP URL if using existing instance')
     scan_parser.add_argument('--api-key', help='ZAP API key')
+    scan_parser.add_argument('--webhook', help='Webhook type: slack, teams, discord')
+    scan_parser.add_argument('--rate-limit', type=float, help='Requests per second')
 
-    idor_parser = subparsers.add_parser('idor', help='Run IDOR detection')
+    # === GRAPHQL COMMAND ===
+    gql_parser = subparsers.add_parser('graphql', help='GraphQL security testing')
+    gql_parser.add_argument('har_file', help='HAR file containing GraphQL requests')
+    gql_parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    gql_parser.add_argument('--introspection', action='store_true',
+                            help='Test introspection endpoints')
+    gql_parser.add_argument('--batch-test', action='store_true',
+                            help='Test batching/aliasing DoS')
+    gql_parser.add_argument('--depth-test', action='store_true',
+                            help='Test query depth limits')
+    gql_parser.add_argument('--fuzz', action='store_true',
+                            help='Fuzz GraphQL arguments')
+
+    # === WEBSOCKET COMMAND ===
+    ws_parser = subparsers.add_parser('websocket', help='WebSocket security testing')
+    ws_parser.add_argument('har_file', help='HAR file containing WebSocket connections')
+    ws_parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    ws_parser.add_argument('--cswsh', action='store_true',
+                           help='Test Cross-Site WebSocket Hijacking')
+    ws_parser.add_argument('--fuzz', action='store_true',
+                           help='Fuzz WebSocket messages')
+
+    # === IDOR COMMAND ===
+    idor_parser = subparsers.add_parser('idor', help='IDOR detection')
     idor_parser.add_argument('--session-a', required=True, help='HAR file for User A')
     idor_parser.add_argument('--session-b', required=True, help='HAR file for User B')
     idor_parser.add_argument('-o', '--output', default='./output', help='Output directory')
     idor_parser.add_argument('--workers', type=int, default=5, help='Parallel workers')
     idor_parser.add_argument('--fail-on-idor', action='store_true',
-                             help='Exit with code 1 if IDOR found')
+                             help='Exit code 1 if IDOR found')
+    idor_parser.add_argument('--webhook', help='Webhook type: slack, teams, discord')
+
+    # === CACHE COMMAND ===
+    cache_parser = subparsers.add_parser('cache', help='Manage incremental scan cache')
+    cache_parser.add_argument('action', choices=['stats', 'clear', 'export'],
+                              help='Cache action')
+    cache_parser.add_argument('--older-than', type=int,
+                              help='Clear entries older than N days')
+    cache_parser.add_argument('-o', '--output', help='Export output file')
 
     args = parser.parse_args()
 
@@ -70,38 +135,81 @@ Examples:
 
     if args.command == 'scan':
         return run_scan(args)
+    elif args.command == 'graphql':
+        return run_graphql(args)
+    elif args.command == 'websocket':
+        return run_websocket(args)
     elif args.command == 'idor':
         return run_idor(args)
+    elif args.command == 'cache':
+        return run_cache(args)
+
     return 0
 
 
 def run_scan(args):
-    """Execute ZAP scan with acceptance criteria"""
+    """Execute ZAP scan with acceptance criteria."""
+    start_time = time.time()
+
     if not Path(args.har_file).exists():
+        logger.error("har_not_found", path=args.har_file)
         print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
         return 1
 
     Path(args.output).mkdir(parents=True, exist_ok=True)
-
     config = load_config(args.config)
 
-    print("[1/4] Analyzing HAR file...")
+    # Apply CLI overrides
+    if args.rate_limit:
+        config['rate_limit'] = args.rate_limit
+
+    # Setup notifications
+    notifier = None
+    if args.webhook:
+        config['webhooks'] = [{'type': args.webhook, 'url': '', 'events': ['all']}]
+        notifier = NotificationManager(config)
+
+    # Setup reporter
+    report_config = {
+        'include_owasp': args.owasp,
+        'include_curl': True,
+        'include_timeline': True,
+        'formats': args.format.split(',')
+    }
+    reporter = Reporter(args.output, report_config)
+    reporter.add_timeline_event('scan_start', f'Scanning {args.har_file}')
+
+    # Incremental scanning
+    incremental = None
+    if args.incremental:
+        incremental = IncrementalScanner()
+        incremental.start_session(args.har_file)
+
+    print("[1/5] Analyzing HAR file...")
     analyzer = HARAnalyzer(args.har_file, config)
     har_data = analyzer.analyze()
     print(analyzer.get_summary())
+    reporter.add_timeline_event('har_analyzed', f'{len(har_data["urls"])} URLs found')
 
     if len(har_data['urls']) == 0:
         print("Error: No URLs found in HAR", file=sys.stderr)
         return 1
+
+    # Delta analysis for incremental
+    if incremental:
+        delta = incremental.get_delta_requests({'entries': har_data.get('entries', [])})
+        print(f"Incremental: {delta['stats']['new']} new, {delta['stats']['cached']} cached")
+        reporter.add_timeline_event('incremental_analysis', str(delta['stats']))
 
     docker_manager = None
     zap_config = None
 
     try:
         if not args.no_docker:
-            print("[2/4] Starting ZAP container...")
+            print("[2/5] Starting ZAP container...")
             docker_manager = DockerZAPManager(config)
             zap_config = docker_manager.start_zap()
+            reporter.add_timeline_event('zap_started', 'Docker container ready')
         else:
             zap_config = {
                 'zap_url': args.zap_url,
@@ -109,62 +217,109 @@ def run_scan(args):
                 'port': 8080
             }
 
-        print("[3/4] Executing scans...")
-        scanner = ZAPScanner(zap_config, har_data, config)
+        print("[3/5] Executing scans...")
+        scanner = ZAPScanner(zap_config, har_data, get_scan_config(config))
         scanner.configure_context()
         scanner.configure_scan_policies()
         scanner.populate_site_tree()
         scan_results = scanner.execute_targeted_scans()
+        reporter.add_timeline_event('scan_complete', f'{len(scan_results)} targets scanned')
+
+        # GraphQL scanning
+        if args.graphql:
+            print("[3b/5] Scanning GraphQL endpoints...")
+            gql_scanner = GraphQLScanner(har_data, config.get('graphql', {}))
+            gql_results = gql_scanner.scan_all()
+            reporter.add_timeline_event('graphql_scan', str(gql_results['summary']))
+            print(f"GraphQL: {gql_results['summary']}")
+
+        # WebSocket scanning
+        if args.websocket:
+            print("[3c/5] Scanning WebSocket endpoints...")
+            ws_scanner = WebSocketScanner(har_data, config.get('websocket', {}))
+            ws_results = ws_scanner.scan_all_sync()
+            reporter.add_timeline_event('websocket_scan', str(ws_results['summary']))
+            print(f"WebSocket: {ws_results['summary']}")
 
         alerts = scanner.get_alerts()
 
-        print(f"[4/4] Generating reports...")
-        reporter = Reporter(args.output)
+        # Notify critical findings immediately
+        if notifier:
+            for alert in alerts:
+                if alert.get('risk') == 'High':
+                    notifier.notify_critical_finding(alert)
 
-        if args.format == 'json':
-            output_file = reporter.save_json_report(alerts, analyzer.get_summary())
-            print(f"Report saved: {output_file}")
+        # Update incremental cache
+        if incremental:
+            for alert in alerts:
+                url = alert.get('url', '')
+                incremental.update_cache(
+                    incremental.hash_request(url, 'GET'),
+                    url, 'GET', None, [alert], 0
+                )
+            incremental.end_session({'total': len(har_data['urls']), 'new': len(alerts)})
 
-        elif args.format == 'html':
-            output_file = reporter.save_html_report(scanner.zap)
-            print(f"Report saved: {output_file}")
+        print(f"[4/5] Generating reports...")
+        duration = f"{time.time() - start_time:.1f}s"
 
-        elif args.format == 'sarif':
-            engine = AcceptanceEngine([])
-            output_path = f"{args.output}/results.sarif"
-            engine.export_sarif({'zap_alerts': alerts}, output_path)
-            print(f"SARIF report saved: {output_path}")
+        # Save reports
+        saved = reporter.save_all_reports(
+            alerts,
+            analyzer.get_summary(),
+            scanner.zap if not args.no_docker else None,
+            args.format.split(',')
+        )
 
-        elif args.format == 'junit':
-            criteria = build_criteria(args)
-            engine = AcceptanceEngine(criteria)
-            evaluation = engine.evaluate({'zap_alerts': alerts, 'idor_results': []})
-            output_path = f"{args.output}/junit.xml"
-            engine.export_junit_xml(evaluation, output_path)
-            print(f"JUnit XML saved: {output_path}")
+        for fmt, path in saved.items():
+            print(f"  {fmt}: {path}")
 
+        # OWASP compliance
+        if args.owasp:
+            owasp = OWASPMapper(config.get('owasp', {}))
+            compliance = owasp.map_alerts(alerts)
+            report = owasp.generate_report(compliance)
+            print(f"\n[OWASP] Score: {report['overall_score']}/100 - {'PASS' if report['passed'] else 'FAIL'}")
+            if report['failed_categories']:
+                print(f"  Failed: {', '.join(report['failed_categories'])}")
+
+        # Console summary
+        reporter.generate_console_report(alerts)
+
+        # Acceptance criteria
         if args.fail_fast:
             criteria = build_criteria(args)
             engine = AcceptanceEngine(criteria)
             evaluation = engine.evaluate({'zap_alerts': alerts, 'idor_results': []})
 
-            print("\nAcceptance Criteria Evaluation:")
+            print("\n[5/5] Acceptance Criteria:")
             for result in evaluation['results']:
-                status = "✓" if result['passed'] else "✗"
-                print(f"  {status} {result['criterion']}: {result['message']}")
+                status = "PASS" if result['passed'] else "FAIL"
+                print(f"  [{status}] {result['criterion']}: {result['message']}")
 
             if not evaluation['passed']:
-                print("\n❌ Security criteria not met!")
+                print(f"\nFAILED - Duration: {duration}")
+                if notifier:
+                    notifier.notify_error("Acceptance criteria failed")
                 return 1
             else:
-                print("\n✅ All security criteria passed!")
+                print(f"\nPASSED - Duration: {duration}")
+
+        # Final notification
+        if notifier:
+            high_count = len([a for a in alerts if a.get('risk') == 'High'])
+            notifier.notify_scan_complete({
+                'target': args.har_file,
+                'alerts_count': len(alerts),
+                'high_count': high_count,
+                'duration': duration
+            })
 
         return 0
 
     except Exception as e:
+        logger.error("scan_error", error=str(e))
         print(f"Error: {e}", file=sys.stderr)
         import traceback
-
         traceback.print_exc()
         return 1
 
@@ -173,8 +328,84 @@ def run_scan(args):
             docker_manager.stop_zap()
 
 
+def run_graphql(args):
+    """Execute GraphQL security testing."""
+    if not Path(args.har_file).exists():
+        print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
+        return 1
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+
+    print("[1/3] Loading HAR file...")
+    with open(args.har_file) as f:
+        har_data = json.load(f)
+
+    print("[2/3] Scanning GraphQL endpoints...")
+    scanner = GraphQLScanner(har_data)
+    endpoints = scanner.detect_endpoints()
+
+    if not endpoints:
+        print("No GraphQL endpoints detected")
+        return 0
+
+    print(f"Found {len(endpoints)} GraphQL endpoints")
+
+    results = scanner.scan_all()
+
+    print(f"[3/3] Results:")
+    print(f"  Endpoints: {results['summary']['total_endpoints']}")
+    print(f"  Introspection enabled: {results['summary']['introspection_enabled']}")
+    print(f"  Vulnerabilities: {results['summary']['vulnerabilities_found']}")
+
+    output_file = Path(args.output) / 'graphql_results.json'
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\nResults saved: {output_file}")
+    return 0
+
+
+def run_websocket(args):
+    """Execute WebSocket security testing."""
+    import asyncio
+
+    if not Path(args.har_file).exists():
+        print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
+        return 1
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+
+    print("[1/3] Loading HAR file...")
+    with open(args.har_file) as f:
+        har_data = json.load(f)
+
+    print("[2/3] Scanning WebSocket endpoints...")
+    scanner = WebSocketScanner(har_data)
+    endpoints = scanner.detect_endpoints()
+
+    if not endpoints:
+        print("No WebSocket endpoints detected")
+        return 0
+
+    print(f"Found {len(endpoints)} WebSocket endpoints")
+
+    results = asyncio.get_event_loop().run_until_complete(scanner.scan_all())
+
+    print(f"[3/3] Results:")
+    print(f"  Endpoints: {results['summary']['total_endpoints']}")
+    print(f"  Require auth: {results['summary']['require_auth']}")
+    print(f"  Vulnerabilities: {results['summary']['vulnerabilities_found']}")
+
+    output_file = Path(args.output) / 'websocket_results.json'
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\nResults saved: {output_file}")
+    return 0
+
+
 def run_idor(args):
-    """Execute IDOR detection"""
+    """Execute IDOR detection."""
     if not Path(args.session_a).exists():
         print(f"Error: Session A HAR not found: {args.session_a}", file=sys.stderr)
         return 1
@@ -200,9 +431,9 @@ def run_idor(args):
 
         print("\nIDOR Detection Summary:")
         print(f"  Total tests: {summary['total_tests']}")
-        print(f"  🚨 Vulnerable: {summary['vulnerable']}")
-        print(f"  ✅ Protected: {summary['protected']}")
-        print(f"  ⚠️  False positives: {summary['false_positives']}")
+        print(f"  Vulnerable: {summary['vulnerable']}")
+        print(f"  Protected: {summary['protected']}")
+        print(f"  False positives: {summary['false_positives']}")
 
         output_file = f"{args.output}/idor_results.json"
         with open(output_file, 'w') as f:
@@ -223,22 +454,50 @@ def run_idor(args):
         print(f"\nResults saved: {output_file}")
 
         if args.fail_on_idor and summary['vulnerable'] > 0:
-            print("\n❌ IDOR vulnerabilities detected!")
+            print("\nFAILED: IDOR vulnerabilities detected!")
             return 1
-        else:
-            print("\n✅ IDOR check complete!")
-            return 0
+
+        return 0
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         import traceback
-
         traceback.print_exc()
         return 1
 
 
+def run_cache(args):
+    """Manage incremental scan cache."""
+    cache = IncrementalScanner()
+
+    if args.action == 'stats':
+        stats = cache.get_cache_stats()
+        print("Cache Statistics:")
+        print(f"  Total entries: {stats['total_entries']}")
+        print(f"  Unique URLs: {stats['unique_urls']}")
+        print(f"  Total alerts: {stats['total_alerts']}")
+        print(f"  DB size: {stats['db_size_bytes'] / 1024:.1f} KB")
+
+        if stats['recent_sessions']:
+            print("\nRecent sessions:")
+            for s in stats['recent_sessions']:
+                print(f"  {s['session_id']}: {s['total_requests']} total, {s['new_requests']} new")
+
+    elif args.action == 'clear':
+        cache.clear_cache(older_than_days=args.older_than)
+        print("Cache cleared")
+
+    elif args.action == 'export':
+        output = args.output or 'cache_export.json'
+        count = cache.export_cache(output)
+        print(f"Exported {count} entries to {output}")
+
+    cache.close()
+    return 0
+
+
 def build_criteria(args):
-    """Build acceptance criteria from CLI args"""
+    """Build acceptance criteria from CLI args."""
     criteria = []
 
     if args.max_high is not None:
@@ -248,32 +507,6 @@ def build_criteria(args):
         criteria.append({'type': 'max_medium', 'threshold': args.max_medium})
 
     return criteria
-
-
-def load_config(config_path):
-    """Load configuration from YAML file"""
-    import yaml
-
-    default_config = {
-        'scope_domains': [],
-        'exclude_domains': [
-            'google-analytics.com',
-            'googletagmanager.com',
-            'facebook.com'
-        ],
-        'allowed_methods': ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-        'zap_port': 8080,
-        'zap_image': 'ghcr.io/zaproxy/zaproxy:stable',
-        'scan_fuzzable_urls': True,
-        'scan_api_endpoints': True
-    }
-
-    if config_path and Path(config_path).exists():
-        with open(config_path) as f:
-            user_config = yaml.safe_load(f)
-            default_config.update(user_config)
-
-    return default_config
 
 
 if __name__ == '__main__':

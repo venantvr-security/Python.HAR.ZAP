@@ -1,11 +1,22 @@
+"""
+ZAP Scanner - Professional DAST automation with retry, rate limiting, and structured logging.
+"""
 import time
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from zapv2 import ZAPv2
 
+from .utils import (
+    ZAPConnectionError, ZAPTimeoutError, ScanError,
+    retry_zap_call, RateLimiter, get_logger
+)
+
+logger = get_logger("zap.scanner")
+
 
 class ZAPScanner:
+    """Professional-grade ZAP scanner with resilient API calls."""
 
     def __init__(self, zap_config: Dict, har_data: Dict, scan_config: Dict):
         self.zap = ZAPv2(
@@ -19,142 +30,165 @@ class ZAPScanner:
         self.scan_config = scan_config
         self.base_url = zap_config['zap_url']
 
+        # Rate limiter from config
+        self.rate_limiter = RateLimiter(
+            requests_per_second=scan_config.get('rate_limit', 10.0),
+            burst=scan_config.get('rate_burst', 20)
+        )
+
+        # Configurable limits
+        self.max_urls = scan_config.get('max_urls', 100)
+        self.max_fuzzable = scan_config.get('max_fuzzable_urls', 20)
+        self.max_api_endpoints = scan_config.get('max_api_endpoints', 10)
+        self.max_scan_time = scan_config.get('max_scan_time', 300)
+
+    @retry_zap_call(max_retries=3)
     def configure_context(self):
-        print("[ZAP] Configuring context and authentication")
+        """Configure ZAP context and authentication headers."""
+        logger.info("configuring_context")
 
-        if self.har_data['auth_headers']:
+        if self.har_data.get('auth_headers'):
             for header, value in self.har_data['auth_headers'].items():
-                try:
-                    self.zap.replacer.add_rule(
-                        description=f"Auto-inject {header}",
-                        enabled=True,
-                        matchtype='REQ_HEADER',
-                        matchstring=header,
-                        replacement=value
-                    )
-                    print(f"[ZAP] Added auth header: {header}")
-                except Exception as e:
-                    print(f"[ZAP] Warning: Could not add header rule: {e}")
+                self.rate_limiter.acquire()
+                self.zap.replacer.add_rule(
+                    description=f"Auto-inject {header}",
+                    enabled=True,
+                    matchtype='REQ_HEADER',
+                    matchstring=header,
+                    replacement=value
+                )
+                logger.debug("auth_header_added", header=header)
 
-    def populate_site_tree(self):
-        print(f"[ZAP] Populating site tree with {len(self.har_data['urls'])} URLs")
-
-        for url in list(self.har_data['urls'])[:100]:
+        excluded_domains = self.scan_config.get('exclude_domains', [])
+        for domain in excluded_domains:
             try:
+                self.rate_limiter.acquire()
+                self.zap.context.exclude_from_context(
+                    contextname='Default Context',
+                    regex=f".*{domain}.*"
+                )
+                logger.debug("domain_excluded", domain=domain)
+            except Exception as e:
+                logger.warning("domain_exclusion_failed", domain=domain, error=str(e))
+
+    @retry_zap_call(max_retries=3)
+    def populate_site_tree(self):
+        """Populate ZAP site tree from HAR URLs."""
+        urls = list(self.har_data.get('urls', []))[:self.max_urls]
+        logger.info("populating_site_tree", url_count=len(urls))
+
+        for url in urls:
+            try:
+                self.rate_limiter.acquire()
                 self.zap.core.access_url(url)
             except Exception as e:
-                print(f"[ZAP] Warning accessing {url}: {e}")
+                logger.debug("url_access_failed", url=url[:50], error=str(e))
 
         time.sleep(2)
 
-    def run_ajax_spider(self, target_url: str, context_name: str = None, max_duration: int = 10) -> Dict:
-        """
-        Execute Ajax Spider for JavaScript-heavy applications.
+    @retry_zap_call(max_retries=2)
+    def run_ajax_spider(
+        self,
+        target_url: str,
+        context_name: Optional[str] = None,
+        max_duration: int = 10
+    ) -> Dict:
+        """Execute Ajax Spider for JavaScript-heavy applications."""
+        logger.info("ajax_spider_start", target=target_url[:50], max_duration=max_duration)
 
-        Arachni-inspired: DOM crawling, AJAX request interception.
-        Discovers hidden endpoints not in HAR.
-        """
-        print(f"[ZAP] Starting Ajax Spider on {target_url}")
+        self.rate_limiter.acquire()
+        self.zap.ajaxSpider.set_option_max_duration(max_duration)
+        self.zap.ajaxSpider.set_option_max_crawl_depth(5)
+        self.zap.ajaxSpider.set_option_number_of_browsers(2)
+        self.zap.ajaxSpider.set_option_browser_id('firefox-headless')
 
-        try:
-            # Configure Ajax Spider
-            self.zap.ajaxSpider.set_option_max_duration(max_duration)
-            self.zap.ajaxSpider.set_option_max_crawl_depth(5)
-            self.zap.ajaxSpider.set_option_number_of_browsers(2)
-            self.zap.ajaxSpider.set_option_browser_id('firefox-headless')
+        scan_id = self.zap.ajaxSpider.scan(
+            url=target_url,
+            inscope='true',
+            contextname=context_name
+        )
 
-            # Start spider
-            scan_id = self.zap.ajaxSpider.scan(
-                url=target_url,
-                inscope='true',
-                contextname=context_name
-            )
+        logger.debug("ajax_spider_started", scan_id=scan_id)
 
-            print(f"[ZAP] Ajax Spider started (scan_id: {scan_id})")
+        start_time = time.time()
+        max_wait = max_duration * 60 + 30
 
-            # Monitor progress (Ajax Spider doesn't have percentage)
-            start_time = time.time()
-            max_wait = max_duration * 60 + 30  # Convert to seconds + buffer
+        while time.time() - start_time < max_wait:
+            self.rate_limiter.acquire()
+            status = self.zap.ajaxSpider.status(scan_id)
 
-            while time.time() - start_time < max_wait:
-                status = self.zap.ajaxSpider.status(scan_id)
+            if status == 'stopped':
+                logger.info("ajax_spider_completed", scan_id=scan_id)
+                break
 
-                if status == 'stopped':
-                    print("[ZAP] Ajax Spider completed")
-                    break
+            results_count = self.zap.ajaxSpider.number_of_results(scan_id)
+            logger.debug("ajax_spider_progress", discovered=results_count)
+            time.sleep(5)
 
-                results_count = self.zap.ajaxSpider.number_of_results(scan_id)
-                print(f"[ZAP] Ajax Spider running... ({results_count} requests discovered)")
-                time.sleep(5)
+        full_results = self.zap.ajaxSpider.full_results(scan_id)
+        discovered_urls = []
 
-            # Get results
-            full_results = self.zap.ajaxSpider.full_results(scan_id)
+        if full_results:
+            for result in full_results:
+                if isinstance(result, dict) and 'url' in result:
+                    discovered_urls.append(result['url'])
 
-            # Extract discovered URLs
-            discovered_urls = []
-            if full_results:
-                for result in full_results:
-                    if isinstance(result, dict) and 'url' in result:
-                        discovered_urls.append(result['url'])
+        logger.info("ajax_spider_results", discovered_count=len(discovered_urls))
 
-            print(f"[ZAP] Ajax Spider discovered {len(discovered_urls)} URLs")
+        return {
+            'scan_id': scan_id,
+            'discovered_urls': discovered_urls,
+            'total_requests': self.zap.ajaxSpider.number_of_results(scan_id)
+        }
 
-            return {
-                'scan_id': scan_id,
-                'discovered_urls': discovered_urls,
-                'total_requests': self.zap.ajaxSpider.number_of_results(scan_id)
-            }
-
-        except Exception as e:
-            print(f"[ZAP] Ajax Spider error: {e}")
-            return {'scan_id': None, 'discovered_urls': [], 'total_requests': 0}
-
+    @retry_zap_call(max_retries=2)
     def run_platform_fingerprinting(self, target_url: str) -> Dict:
-        """
-        Platform fingerprinting (Arachni-inspired).
-        Detects OS, web server, frameworks, languages via passive scanners.
-        """
-        print(f"[ZAP] Platform fingerprinting on {target_url}")
+        """Platform fingerprinting via passive scanners."""
+        logger.info("fingerprinting_start", target=target_url[:50])
 
+        tech_scanners = ['10055', '10096', '10109']
+        for scanner_id in tech_scanners:
+            try:
+                self.rate_limiter.acquire()
+                self.zap.pscan.enable_scanners(scanner_id)
+            except Exception:
+                pass
+
+        self.rate_limiter.acquire()
+        self.zap.core.access_url(target_url)
+        time.sleep(2)
+
+        # Wait for passive scan
+        timeout = 30
+        start = time.time()
+        while time.time() - start < timeout:
+            records = int(self.zap.pscan.records_to_scan)
+            if records == 0:
+                break
+            time.sleep(1)
+
+        alerts = self.zap.core.alerts(baseurl=target_url)
+        technologies = defaultdict(list)
+
+        for alert in alerts:
+            title = alert.get('alert', '').lower()
+            evidence = alert.get('evidence', '')
+
+            if any(x in title for x in ['server', 'technology', 'application']):
+                tech_type = 'web_server'
+                if 'language' in title or 'framework' in title:
+                    tech_type = 'framework'
+                elif 'database' in title:
+                    tech_type = 'database'
+
+                technologies[tech_type].append({
+                    'name': alert.get('alert', ''),
+                    'evidence': evidence,
+                    'confidence': alert.get('confidence', '')
+                })
+
+        # Extract Server header
         try:
-            # Enable tech detection passive scanners
-            tech_scanners = ['10055', '10096', '10109']  # CSP, Timestamp, Wappalyzer
-            for scanner_id in tech_scanners:
-                try:
-                    self.zap.pscan.enable_scanners(scanner_id)
-                except Exception:
-                    pass
-
-            # Access target to generate traffic
-            self.zap.core.access_url(target_url)
-            time.sleep(2)
-
-            # Wait for passive scan
-            while int(self.zap.pscan.records_to_scan) > 0:
-                time.sleep(1)
-
-            # Extract technology info from alerts
-            alerts = self.zap.core.alerts(baseurl=target_url)
-            technologies = defaultdict(list)
-
-            for alert in alerts:
-                title = alert.get('alert', '').lower()
-                evidence = alert.get('evidence', '')
-
-                if 'server' in title or 'technology' in title or 'application' in title:
-                    tech_type = 'web_server'
-                    if 'language' in title or 'framework' in title:
-                        tech_type = 'framework'
-                    elif 'database' in title:
-                        tech_type = 'database'
-
-                    technologies[tech_type].append({
-                        'name': alert.get('alert', ''),
-                        'evidence': evidence,
-                        'confidence': alert.get('confidence', '')
-                    })
-
-            # Also check Server headers from site tree
             sites = self.zap.core.sites
             for site in sites:
                 if target_url in site:
@@ -166,198 +200,195 @@ class ZAPScanner:
                                 server = header.split('Server:')[1].split('\n')[0].strip()
                                 technologies['web_server'].append({
                                     'name': f'Server: {server}',
-                                    'evidence': header,
+                                    'evidence': server,
                                     'confidence': 'High'
                                 })
                                 break
                     break
+        except Exception:
+            pass
 
-            fingerprint = {
-                'target': target_url,
-                'technologies': dict(technologies),
-                'scanner_count': len(technologies)
-            }
+        logger.info("fingerprinting_complete", categories=len(technologies))
 
-            print(f"[ZAP] Fingerprinting found {len(technologies)} technology categories")
-            return fingerprint
+        return {
+            'target': target_url,
+            'technologies': dict(technologies),
+            'scanner_count': len(technologies)
+        }
 
-        except Exception as e:
-            print(f"[ZAP] Fingerprinting error: {e}")
-            return {'target': target_url, 'technologies': {}, 'scanner_count': 0}
+    @retry_zap_call(max_retries=2)
+    def run_traditional_spider(
+        self,
+        target_url: str,
+        context_name: Optional[str] = None,
+        max_duration: int = 10
+    ) -> Dict:
+        """Execute traditional spider for static content discovery."""
+        logger.info("spider_start", target=target_url[:50], max_duration=max_duration)
 
-    def run_traditional_spider(self, target_url: str, context_name: str = None, max_duration: int = 10) -> Dict:
-        """
-        Execute traditional spider for static content discovery.
-        """
-        print(f"[ZAP] Starting traditional spider on {target_url}")
+        self.rate_limiter.acquire()
+        self.zap.spider.set_option_max_duration(max_duration)
+        self.zap.spider.set_option_max_depth(5)
+        self.zap.spider.set_option_max_children(10)
 
-        try:
-            # Configure spider
-            self.zap.spider.set_option_max_duration(max_duration)
-            self.zap.spider.set_option_max_depth(5)
-            self.zap.spider.set_option_max_children(10)
+        scan_id = self.zap.spider.scan(
+            url=target_url,
+            maxchildren=10,
+            recurse=True,
+            contextname=context_name,
+            subtreeonly=False
+        )
 
-            # Start spider
-            scan_id = self.zap.spider.scan(
-                url=target_url,
-                maxchildren=10,
-                recurse=True,
-                contextname=context_name,
-                subtreeonly=False
-            )
+        logger.debug("spider_started", scan_id=scan_id)
 
-            print(f"[ZAP] Spider started (scan_id: {scan_id})")
+        while int(self.zap.spider.status(scan_id)) < 100:
+            progress = self.zap.spider.status(scan_id)
+            logger.debug("spider_progress", progress=f"{progress}%")
+            time.sleep(2)
 
-            # Monitor progress
-            while int(self.zap.spider.status(scan_id)) < 100:
-                progress = self.zap.spider.status(scan_id)
-                print(f"[ZAP] Spider progress: {progress}%")
-                time.sleep(2)
+        discovered_urls = self.zap.spider.results(scan_id)
+        logger.info("spider_complete", discovered_count=len(discovered_urls))
 
-            # Get results
-            discovered_urls = self.zap.spider.results(scan_id)
-
-            print(f"[ZAP] Spider discovered {len(discovered_urls)} URLs")
-
-            return {
-                'scan_id': scan_id,
-                'discovered_urls': discovered_urls
-            }
-
-        except Exception as e:
-            print(f"[ZAP] Spider error: {e}")
-            return {'scan_id': None, 'discovered_urls': []}
+        return {
+            'scan_id': scan_id,
+            'discovered_urls': discovered_urls
+        }
 
     def execute_targeted_scans(self) -> List[Dict]:
+        """Execute targeted active scans on fuzzable URLs and API endpoints."""
         scan_results = []
 
         if self.scan_config.get('scan_fuzzable_urls', True):
-            print(f"[ZAP] Scanning {len(self.har_data['fuzzable_urls'])} fuzzable URLs")
+            fuzzable = self.har_data.get('fuzzable_urls', [])[:self.max_fuzzable]
+            logger.info("scanning_fuzzable_urls", count=len(fuzzable))
 
-            for target in self.har_data['fuzzable_urls'][:20]:
-                url = target['url']
-                params = target['params']
+            for target in fuzzable:
+                result = self._scan_single_target(target, target_type='fuzzable')
+                if result:
+                    scan_results.append(result)
 
-                print(f"[ZAP] Active scan on: {url} (params: {', '.join(params)})")
+        if self.scan_config.get('scan_api_endpoints', True):
+            apis = self.har_data.get('api_endpoints', [])[:self.max_api_endpoints]
+            logger.info("scanning_api_endpoints", count=len(apis))
 
-                try:
-                    scan_id = self.zap.ascan.scan(
-                        url=url,
-                        recurse=False,
-                        inscopeonly=False,
-                        scanpolicyname=self._get_policy_for_target(target)
-                    )
-
-                    self._wait_for_scan(scan_id, url)
-
-                    scan_results.append({
-                        'url': url,
-                        'scan_id': scan_id,
-                        'params': params
-                    })
-
-                except Exception as e:
-                    print(f"[ZAP] Error scanning {url}: {e}")
-
-        if self.scan_config.get('scan_api_endpoints', True) and self.har_data['api_endpoints']:
-            print(f"[ZAP] Scanning {len(self.har_data['api_endpoints'])} API endpoints")
-
-            for api in self.har_data['api_endpoints'][:10]:
-                url = api['url']
-                print(f"[ZAP] API scan: {url}")
-
-                try:
-                    scan_id = self.zap.ascan.scan(
-                        url=url,
-                        recurse=False,
-                        inscopeonly=False,
-                        scanpolicyname='API-Minimal'
-                    )
-
-                    self._wait_for_scan(scan_id, url)
-
-                    scan_results.append({
-                        'url': url,
-                        'scan_id': scan_id,
-                        'type': 'api'
-                    })
-
-                except Exception as e:
-                    print(f"[ZAP] Error scanning API {url}: {e}")
+            for api in apis:
+                result = self._scan_single_target(api, target_type='api')
+                if result:
+                    scan_results.append(result)
 
         return scan_results
 
+    @retry_zap_call(max_retries=2)
+    def _scan_single_target(self, target: Dict, target_type: str = 'generic') -> Optional[Dict]:
+        """Scan a single target with appropriate policy."""
+        url = target.get('url', '')
+        params = target.get('params', [])
+
+        logger.debug("scanning_target", url=url[:50], params=params, type=target_type)
+
+        try:
+            self.rate_limiter.acquire()
+            policy = 'API-Minimal' if target_type == 'api' else self._get_policy_for_target(target)
+
+            scan_id = self.zap.ascan.scan(
+                url=url,
+                recurse=False,
+                inscopeonly=False,
+                scanpolicyname=policy
+            )
+
+            self._wait_for_scan(scan_id, url)
+
+            return {
+                'url': url,
+                'scan_id': scan_id,
+                'params': params,
+                'type': target_type
+            }
+
+        except ZAPTimeoutError:
+            logger.warning("scan_timeout", url=url[:50])
+            return None
+        except Exception as e:
+            logger.error("scan_failed", url=url[:50], error=str(e))
+            return None
+
     @staticmethod
     def _get_policy_for_target(target: Dict) -> str:
+        """Select scan policy based on target parameters."""
         params = target.get('params', [])
 
         if any('sql' in p.lower() or 'id' in p.lower() for p in params):
             return 'SQL-Injection'
         elif any('file' in p.lower() or 'path' in p.lower() for p in params):
             return 'Path-Traversal'
-        else:
-            return 'Default Policy'
+        return 'Default Policy'
 
-    def _wait_for_scan(self, scan_id: str, url: str, max_wait: int = 300):
+    def _wait_for_scan(self, scan_id: str, url: str):
+        """Wait for scan completion with timeout."""
         start_time = time.time()
         last_progress = -1
 
-        while time.time() - start_time < max_wait:
+        while time.time() - start_time < self.max_scan_time:
             try:
+                self.rate_limiter.acquire()
                 status = int(self.zap.ascan.status(scan_id))
 
-                if status != last_progress and status % 10 == 0:
-                    print(f"[ZAP] Scan progress for {url}: {status}%")
+                if status != last_progress and status % 20 == 0:
+                    logger.debug("scan_progress", url=url[:30], progress=f"{status}%")
                     last_progress = status
 
                 if status >= 100:
-                    print(f"[ZAP] Scan completed for {url}")
+                    logger.info("scan_completed", url=url[:30])
                     return
 
                 time.sleep(3)
 
             except Exception as e:
-                print(f"[ZAP] Error checking scan status: {e}")
+                logger.warning("scan_status_error", error=str(e))
                 break
 
-        print(f"[ZAP] Scan timeout or stopped for {url}")
+        logger.warning("scan_timeout", url=url[:30])
 
+    @retry_zap_call(max_retries=2)
     def configure_scan_policies(self):
-        print("[ZAP] Configuring scan policies")
+        """Configure ZAP scan policies."""
+        logger.info("configuring_policies")
 
         try:
             policies = self.zap.ascan.scan_policy_names
-            print(f"[ZAP] Available policies: {policies}")
+            logger.debug("available_policies", policies=policies)
 
-            disabled_scanners = [
-                '10202',  # Absence of Anti-CSRF Tokens
-                '10096',  # Timestamp Disclosure
-                '10105',  # Weak Authentication Method
-            ]
-
+            # Disable noisy scanners
+            disabled_scanners = ['10202', '10096', '10105']
             for scanner_id in disabled_scanners:
                 try:
+                    self.rate_limiter.acquire()
                     self.zap.ascan.set_scanner_alert_threshold(
                         id=scanner_id,
                         alertthreshold='OFF'
                     )
-                except Exception:  # Broad exception for robustness
+                except Exception:
                     pass
 
         except Exception as e:
-            print(f"[ZAP] Warning configuring policies: {e}")
+            logger.warning("policy_config_failed", error=str(e))
 
-    def get_alerts(self, risk_level: str = None) -> List[Dict]:
+    def get_alerts(self, risk_level: Optional[str] = None) -> List[Dict]:
+        """Get alerts, optionally filtered by risk level."""
+        self.rate_limiter.acquire()
         alerts = self.zap.core.alerts()
 
         if risk_level:
             alerts = [a for a in alerts if a.get('risk', '').lower() == risk_level.lower()]
 
+        logger.info("alerts_retrieved", count=len(alerts), filter=risk_level)
         return alerts
 
     def shutdown(self):
-        print("[ZAP] Shutting down ZAP")
+        """Shutdown ZAP gracefully."""
+        logger.info("shutting_down")
         try:
             self.zap.core.shutdown()
-        except Exception:  # Broad exception for robustness
+        except Exception:
             pass

