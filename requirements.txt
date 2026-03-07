@@ -2,9 +2,16 @@ docker>=7.0.0
 python-owasp-zap-v2.4>=0.0.22
 pyyaml>=6.0
 requests>=2.31.0
-streamlit>=1.28.0
 pandas>=2.0.0
 urllib3<2.0.0
 aiohttp>=3.9.0
 pytest>=7.4.0
 behave>=1.2.6
+# Web API & TOR
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+PySocks>=1.7.1
+jinja2>=3.1.0
+python-multipart>=0.0.6
+markdown>=3.5.0

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Onboarding - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>Onboarding</h1>
+
+<div class="wizard-progress">
+    {% for s in steps %}
+    <div class="wizard-step {% if loop.index0 < current_step %}completed{% endif %} {% if loop.index0 == current_step %}current{% endif %}"></div>
+    {% endfor %}
+</div>
+
+<p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+    Step {{ current_step + 1 }} / {{ steps|length }}
+</p>
+
+<div class="card">
+    <h2 id="wizard-title">{{ step.title }}</h2>
+
+    {% if step.optional %}
+    <p style="color: var(--text-secondary); font-size: 0.875rem;">This step is optional</p>
+    {% endif %}
+
+    <div id="wizard-content" class="markdown-content" style="margin-top: 1rem;">
+        {{ step.content|safe }}
+    </div>
+
+    {% if step.has_action %}
+    <div style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        {% if step.action == 'docker_setup' %}
+        <h3>Docker Setup</h3>
+        {% if zap_status.running %}
+        <div class="alert alert-success">ZAP is running on {{ zap_status.zap_url }}</div>
+        {% else %}
+        <button class="btn btn-primary" onclick="startZap()">Start ZAP Docker</button>
+        {% endif %}
+        {% elif step.action == 'tor_setup' %}
+        <h3>TOR Setup</h3>
+        {% if tor_status.connected %}
+        <div class="alert alert-success">TOR connected - Exit IP: {{ tor_status.exit_ip }}</div>
+        {% else %}
+        <a href="/tor" class="btn btn-primary">Configure TOR</a>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="wizard-nav">
+    <div>
+        {% if current_step > 0 %}
+        <a href="/wizard?step={{ current_step - 1 }}" class="btn btn-secondary">Previous</a>
+        {% endif %}
+    </div>
+
+    <div style="display: flex; gap: 1rem;">
+        {% if step.optional %}
+        <a href="/wizard?step={{ current_step + 1 }}" class="btn btn-secondary">Skip</a>
+        {% endif %}
+
+        {% if current_step < steps|length - 1 %}
+        <a href="/wizard?step={{ current_step + 1 }}" class="btn btn-primary">Next</a>
+        {% else %}
+        <a href="/" class="btn btn-success">Finish</a>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+setWizardStep({{ current_step }});
+</script>
+{% endblock %}

@@ -1,13 +1,16 @@
 """
 Red Team Attack Modules - Business Logic & Access Control Testing
+
+All requests routed through ZAP for unified logging and alerting.
 """
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING
 
-import requests
+if TYPE_CHECKING:
+    from modules.zap_http_client import ZAPHttpClient
 
 from modules.utils.masking import mask_url
 
@@ -35,9 +38,45 @@ class AttackResult:
 class UnauthenticatedReplayAttack:
     """Test if authenticated endpoints are accessible without credentials"""
 
-    def __init__(self, har_data: Dict):
+    def __init__(self, har_data: Dict, zap_client: 'ZAPHttpClient' = None):
         self.har_data = har_data
         self.results = []
+        self.zap_client = zap_client
+        self._use_zap = zap_client is not None
+
+    def _request(self, method: str, url: str, headers: Dict = None,
+                 data: str = None, allow_redirects: bool = False) -> Optional[Dict]:
+        """HTTP request via ZAP or fallback"""
+        try:
+            if self._use_zap:
+                resp = self.zap_client.request(method, url, headers=headers, data=data,
+                                               timeout=10, follow_redirects=allow_redirects)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': resp.headers, 'text': resp.text}
+            else:
+                import requests
+                resp = requests.request(method=method, url=url, headers=headers, data=data,
+                                       timeout=10, verify=False, allow_redirects=allow_redirects)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': dict(resp.headers), 'text': resp.text}
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _raise_alert(self, result: 'AttackResult'):
+        """Raise ZAP alert for finding"""
+        if not self._use_zap or not result.vulnerable:
+            return
+        self.zap_client.raise_alert(
+            risk=3,  # High
+            confidence=2,
+            name="Unauthenticated Access",
+            description=result.description,
+            uri=result.url,
+            attack="Removed authentication headers",
+            evidence=f"Status: {result.evidence.get('status_code')}, Size: {result.evidence.get('content_length')}",
+            cwe_id=287,
+            wasc_id=1
+        )
 
     def identify_authenticated_requests(self) -> List[Dict]:
         """Extract requests that have authentication headers"""
@@ -66,8 +105,7 @@ class UnauthenticatedReplayAttack:
 
         return authenticated
 
-    @staticmethod
-    def execute_unauth_replay(request: Dict) -> AttackResult:
+    def execute_unauth_replay(self, request: Dict) -> AttackResult:
         """Execute request without authentication headers"""
         url = request['url']
         method = request['method']
@@ -80,59 +118,51 @@ class UnauthenticatedReplayAttack:
 
         clean_headers['User-Agent'] = 'Mozilla/5.0 (Security Test)'
 
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=clean_headers,
-                data=request.get('body'),
-                timeout=10,
-                verify=False,
-                allow_redirects=False
-            )
+        response = self._request(method, url, headers=clean_headers,
+                                 data=request.get('body'), allow_redirects=False)
 
-            original_status = request['original_response'].get('status', 0)
-            original_size = request['original_response'].get('bodySize', 0)
-
-            is_vulnerable = (
-                    response.status_code == 200
-                    and len(response.content) > 100
-                    and response.status_code == original_status
-            )
-
-            confidence = 0.0
-            if is_vulnerable:
-                size_ratio = len(response.content) / max(original_size, 1)
-                confidence = min(size_ratio, 1.0) if size_ratio > 0.5 else 0.3
-
-            return AttackResult(
-                attack_type=AttackType.UNAUTH_REPLAY,
-                url=url,
-                method=method,
-                vulnerable=is_vulnerable,
-                confidence=confidence,
-                evidence={
-                    'status_code': response.status_code,
-                    'content_length': len(response.content),
-                    'original_status': original_status,
-                    'original_size': original_size,
-                    'headers_removed': ['Authorization', 'Cookie', 'Token']
-                },
-                description=f"Endpoint accessible without authentication (HTTP {response.status_code})",
-                remediation="Implement proper authentication checks on server-side"
-            )
-
-        except Exception as e:
+        if 'error' in response:
             return AttackResult(
                 attack_type=AttackType.UNAUTH_REPLAY,
                 url=url,
                 method=method,
                 vulnerable=False,
                 confidence=0.0,
-                evidence={'error': str(e)},
-                description=f"Test failed: {e}",
+                evidence={'error': response['error']},
+                description=f"Test failed: {response['error']}",
                 remediation=""
             )
+
+        original_status = request['original_response'].get('status', 0)
+        original_size = request['original_response'].get('bodySize', 0)
+
+        is_vulnerable = (
+                response['status_code'] == 200
+                and len(response['content']) > 100
+                and response['status_code'] == original_status
+        )
+
+        confidence = 0.0
+        if is_vulnerable:
+            size_ratio = len(response['content']) / max(original_size, 1)
+            confidence = min(size_ratio, 1.0) if size_ratio > 0.5 else 0.3
+
+        return AttackResult(
+            attack_type=AttackType.UNAUTH_REPLAY,
+            url=url,
+            method=method,
+            vulnerable=is_vulnerable,
+            confidence=confidence,
+            evidence={
+                'status_code': response['status_code'],
+                'content_length': len(response['content']),
+                'original_status': original_status,
+                'original_size': original_size,
+                'headers_removed': ['Authorization', 'Cookie', 'Token']
+            },
+            description=f"Endpoint accessible without authentication (HTTP {response['status_code']})",
+            remediation="Implement proper authentication checks on server-side"
+        )
 
     def run_attack(self, max_workers: int = 5) -> List[AttackResult]:
         """Execute unauthenticated replay on all authenticated requests"""
@@ -143,18 +173,13 @@ class UnauthenticatedReplayAttack:
         print("[RedTeam] Testing unauthenticated access...")
 
         results = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(self.execute_unauth_replay, req)
-                for req in auth_requests
-            ]
+        for req in auth_requests:
+            result = self.execute_unauth_replay(req)
+            results.append(result)
 
-            for future in futures:
-                result = future.result()
-                results.append(result)
-
-                if result.vulnerable:
-                    print(f"[RedTeam] 🚨 CRITICAL: {mask_url(result.url)} accessible without auth!")
+            if result.vulnerable:
+                self._raise_alert(result)
+                print(f"[RedTeam] 🚨 CRITICAL: {mask_url(result.url)} accessible without auth!")
 
         self.results = results
         return results
@@ -177,13 +202,48 @@ class MassAssignmentFuzzer:
         {'balance': 999999}
     ]
 
-    def __init__(self, har_data: Dict, config: Dict = None):
+    def __init__(self, har_data: Dict, config: Dict = None, zap_client: 'ZAPHttpClient' = None):
         self.har_data = har_data
         self.config = config or {}
         self.results = []
+        self.zap_client = zap_client
+        self._use_zap = zap_client is not None
 
         # Load payloads from config or use defaults
         self.payloads = self._load_payloads()
+
+    def _request(self, method: str, url: str, headers: Dict = None,
+                 json_data: Dict = None) -> Optional[Dict]:
+        """HTTP request via ZAP or fallback"""
+        try:
+            if self._use_zap:
+                resp = self.zap_client.request(method, url, headers=headers, data=json_data, timeout=10)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': resp.headers, 'text': resp.text}
+            else:
+                import requests
+                resp = requests.request(method=method, url=url, headers=headers,
+                                       json=json_data, timeout=10, verify=False)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': dict(resp.headers), 'text': resp.text}
+        except Exception:
+            return None
+
+    def _raise_alert(self, result: 'AttackResult'):
+        """Raise ZAP alert for finding"""
+        if not self._use_zap or not result.vulnerable:
+            return
+        self.zap_client.raise_alert(
+            risk=2,  # Medium
+            confidence=2,
+            name="Mass Assignment Vulnerability",
+            description=result.description,
+            uri=result.url,
+            attack=str(result.evidence.get('injected_params')),
+            evidence=f"Status: {result.evidence.get('status_code')}",
+            cwe_id=915,
+            wasc_id=20
+        )
 
     def _load_payloads(self) -> List[Dict]:
         """Load mass assignment payloads from config or use defaults"""
@@ -231,58 +291,48 @@ class MassAssignmentFuzzer:
 
     def inject_dangerous_params(self, request: Dict) -> List[AttackResult]:
         """Inject mass assignment payloads"""
+        import json as json_lib
         results = []
         url = request['url']
         method = request['method']
         headers = request['headers']
 
         try:
-            original_body = eval(request['body']) if request['body'] else {}
-        except Exception:  # Broad exception for robustness
-            import json
-
-            try:
-                original_body = json.loads(request['body'])
-            except Exception:  # Broad exception for robustness
-                return results
+            original_body = json_lib.loads(request['body']) if request['body'] else {}
+        except Exception:
+            return results
 
         for dangerous_payload in self.payloads:
             poisoned_body = {**original_body, **dangerous_payload}
 
-            try:
-                response = requests.request(
-                    method=method,
+            response = self._request(method, url, headers=headers, json_data=poisoned_body)
+
+            if response is None:
+                continue
+
+            is_vulnerable = (
+                    response['status_code'] in [200, 201, 204]
+                    and 'error' not in response['text'].lower()
+                    and 'invalid' not in response['text'].lower()
+            )
+
+            if is_vulnerable:
+                result = AttackResult(
+                    attack_type=AttackType.MASS_ASSIGNMENT,
                     url=url,
-                    headers=headers,
-                    json=poisoned_body,
-                    timeout=10,
-                    verify=False
+                    method=method,
+                    vulnerable=True,
+                    confidence=0.7,
+                    evidence={
+                        'injected_params': dangerous_payload,
+                        'status_code': response['status_code'],
+                        'response_preview': response['text'][:500]
+                    },
+                    description=f"Endpoint accepted privilege escalation parameter: {dangerous_payload}",
+                    remediation="Use allowlist/DTO pattern for input validation"
                 )
-
-                is_vulnerable = (
-                        response.status_code in [200, 201, 204]
-                        and 'error' not in response.text.lower()
-                        and 'invalid' not in response.text.lower()
-                )
-
-                if is_vulnerable:
-                    results.append(AttackResult(
-                        attack_type=AttackType.MASS_ASSIGNMENT,
-                        url=url,
-                        method=method,
-                        vulnerable=True,
-                        confidence=0.7,
-                        evidence={
-                            'injected_params': dangerous_payload,
-                            'status_code': response.status_code,
-                            'response_preview': response.text[:500]
-                        },
-                        description=f"Endpoint accepted privilege escalation parameter: {dangerous_payload}",
-                        remediation="Use allowlist/DTO pattern for input validation"
-                    ))
-
-            except Exception as e:
-                pass
+                results.append(result)
+                self._raise_alert(result)
 
         return results
 
@@ -320,10 +370,44 @@ class HiddenParameterDiscovery:
         ('show_errors', ['true', '1'])
     ]
 
-    def __init__(self, har_data: Dict, config: Dict = None):
+    def __init__(self, har_data: Dict, config: Dict = None, zap_client: 'ZAPHttpClient' = None):
         self.har_data = har_data
         self.config = config or {}
         self.hidden_params = self._load_hidden_params()
+        self.zap_client = zap_client
+        self._use_zap = zap_client is not None
+
+    def _get(self, url: str, headers: Dict = None) -> Optional[Dict]:
+        """HTTP GET via ZAP or fallback"""
+        try:
+            if self._use_zap:
+                resp = self.zap_client.get(url, headers=headers, timeout=5)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': resp.headers, 'text': resp.text}
+            else:
+                import requests
+                resp = requests.get(url, headers=headers, timeout=5, verify=False)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': dict(resp.headers), 'text': resp.text}
+        except Exception:
+            return None
+
+    def _raise_alert(self, result: 'AttackResult'):
+        """Raise ZAP alert for finding"""
+        if not self._use_zap or not result.vulnerable:
+            return
+        self.zap_client.raise_alert(
+            risk=1,  # Low
+            confidence=2,
+            name="Hidden Parameter Discovered",
+            description=result.description,
+            uri=result.url,
+            param=result.evidence.get('parameter'),
+            attack=f"{result.evidence.get('parameter')}={result.evidence.get('value')}",
+            evidence=f"Size diff: {result.evidence.get('modified_size') - result.evidence.get('baseline_size')} bytes",
+            cwe_id=200,
+            wasc_id=13
+        )
 
     def _load_hidden_params(self) -> List[tuple]:
         """Load hidden parameters from config or use defaults"""
@@ -349,43 +433,40 @@ class HiddenParameterDiscovery:
         """Test URL with hidden parameter variations"""
         results = []
 
+        baseline_response = self._get(url, headers=headers)
+        if baseline_response is None:
+            return results
+
         for param_name, values in self.hidden_params:
             for value in values:
                 separator = '&' if '?' in url else '?'
                 test_url = f"{url}{separator}{param_name}={value}"
 
-                try:
-                    response = requests.get(
-                        test_url,
-                        headers=headers,
-                        timeout=5,
-                        verify=False
+                response = self._get(test_url, headers=headers)
+                if response is None:
+                    continue
+
+                content_diff = abs(len(response['content']) - len(baseline_response['content']))
+                is_vulnerable = content_diff > 100
+
+                if is_vulnerable:
+                    result = AttackResult(
+                        attack_type=AttackType.HIDDEN_PARAMS,
+                        url=test_url,
+                        method='GET',
+                        vulnerable=True,
+                        confidence=0.6,
+                        evidence={
+                            'parameter': param_name,
+                            'value': value,
+                            'baseline_size': len(baseline_response['content']),
+                            'modified_size': len(response['content'])
+                        },
+                        description=f"Hidden parameter '{param_name}' changes response",
+                        remediation="Remove debug parameters from production"
                     )
-
-                    baseline_response = requests.get(url, headers=headers, timeout=5, verify=False)
-
-                    content_diff = abs(len(response.content) - len(baseline_response.content))
-                    is_vulnerable = content_diff > 100
-
-                    if is_vulnerable:
-                        results.append(AttackResult(
-                            attack_type=AttackType.HIDDEN_PARAMS,
-                            url=test_url,
-                            method='GET',
-                            vulnerable=True,
-                            confidence=0.6,
-                            evidence={
-                                'parameter': param_name,
-                                'value': value,
-                                'baseline_size': len(baseline_response.content),
-                                'modified_size': len(response.content)
-                            },
-                            description=f"Hidden parameter '{param_name}' changes response",
-                            remediation="Remove debug parameters from production"
-                        ))
-
-                except Exception:  # Broad exception for robustness
-                    pass
+                    results.append(result)
+                    self._raise_alert(result)
 
         return results
 
@@ -409,12 +490,34 @@ class HiddenParameterDiscovery:
 
 
 class RaceConditionTester:
-    """Test for race conditions on critical endpoints (TOCTOU, coupon abuse, etc.)"""
+    """Test for race conditions on critical endpoints (TOCTOU, coupon abuse, etc.)
 
-    def __init__(self, har_data: Dict, config: Dict = None):
+    Note: Race condition testing uses aiohttp directly for precise timing.
+    ZAP alerting is used for reporting findings.
+    """
+
+    def __init__(self, har_data: Dict, config: Dict = None, zap_client: 'ZAPHttpClient' = None):
         self.har_data = har_data
         self.config = config or {}
         self.burst_count = self.config.get('race_condition_requests', 50)
+        self.zap_client = zap_client
+        self._use_zap = zap_client is not None
+
+    def _raise_alert(self, result: 'AttackResult'):
+        """Raise ZAP alert for finding"""
+        if not self._use_zap or not result.vulnerable:
+            return
+        self.zap_client.raise_alert(
+            risk=2,  # Medium
+            confidence=1,  # Low confidence (needs manual verification)
+            name="Potential Race Condition",
+            description=result.description,
+            uri=result.url,
+            attack=f"Burst of {result.evidence.get('burst_size')} concurrent requests",
+            evidence=f"Success count: {result.evidence.get('success_count')}",
+            cwe_id=362,
+            wasc_id=27
+        )
 
     async def burst_request(self, url: str, method: str, headers: Dict, body: str = None) -> List[Dict]:
         """Send burst of N simultaneous requests"""
@@ -580,6 +683,7 @@ class RaceConditionTester:
                         remediation="Implement proper locking/semaphores and idempotency checks"
                     )
                     results.append(result)
+                    self._raise_alert(result)
                     print(f"[RedTeam] ⚠️  Possible race condition vulnerability detected!")
 
             except Exception as e:
@@ -591,10 +695,11 @@ class RaceConditionTester:
 class RedTeamOrchestrator:
     """Orchestrate all red team attacks"""
 
-    def __init__(self, har_data: Dict, config: Dict = None):
+    def __init__(self, har_data: Dict, config: Dict = None, zap_client: 'ZAPHttpClient' = None):
         self.har_data = har_data
         self.config = config or {}
         self.results = {}
+        self.zap_client = zap_client
 
     def run_all_attacks(self) -> Dict[str, List[AttackResult]]:
         """Execute all red team attack modules"""
@@ -603,22 +708,19 @@ class RedTeamOrchestrator:
         print("=" * 80)
 
         self.results['unauth_replay'] = UnauthenticatedReplayAttack(
-            self.har_data
+            self.har_data, zap_client=self.zap_client
         ).run_attack()
 
         self.results['mass_assignment'] = MassAssignmentFuzzer(
-            self.har_data,
-            self.config
+            self.har_data, self.config, zap_client=self.zap_client
         ).run_attack()
 
         self.results['hidden_params'] = HiddenParameterDiscovery(
-            self.har_data,
-            self.config
+            self.har_data, self.config, zap_client=self.zap_client
         ).run_attack()
 
         self.results['race_condition'] = RaceConditionTester(
-            self.har_data,
-            self.config
+            self.har_data, self.config, zap_client=self.zap_client
         ).run_attack()
 
         return self.results

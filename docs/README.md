@@ -13,6 +13,7 @@
 | [Configuration](guides/CONFIGURATION.md) | Config file, environment variables |
 | [Scanning Guide](guides/SCANNING.md) | Running scans, modes, options |
 | [Payloads](guides/PAYLOADS.md) | Payload library, customization |
+| [Advanced Attacks](guides/ADVANCED_ATTACKS.md) | Smuggling, JWT, CORS, Cache |
 | [CLI Reference](api/CLI.md) | Command line interface |
 | [Modules API](api/MODULES.md) | Python API reference |
 | [CI/CD Integration](examples/CICD.md) | GitHub Actions, GitLab CI |
@@ -30,6 +31,7 @@ graph TB
         websocket[websocket]
         idor[idor]
         cache[cache]
+        advanced[advanced]
     end
 
     subgraph Core["Core Modules"]
@@ -40,6 +42,14 @@ graph TB
         websocket_scanner[websocket_scanner.py]
         idor_detector[idor_detector.py]
         redteam[redteam_attacks.py]
+    end
+
+    subgraph Advanced["Advanced Attacks"]
+        smuggling[http_smuggling.py]
+        cache_poison[cache_poisoning.py]
+        jwt[jwt_attacks.py]
+        cors[cors_tester.py]
+        timing[timing_analysis.py]
     end
 
     subgraph Infra["Infrastructure"]
@@ -57,8 +67,10 @@ graph TB
     end
 
     CLI --> Core
+    CLI --> Advanced
     Core --> Infra
     Core --> Report
+    Advanced --> Infra
 ```
 
 ---
@@ -80,6 +92,11 @@ graph TB
 | Webhook notifications | Slack, Teams, Discord | ✅ |
 | Rate limiting | Configurable request rate | ✅ |
 | Custom payloads | Hierarchical payload library | ✅ |
+| HTTP Smuggling | CL.TE, TE.CL, TE.TE detection | ✅ |
+| Cache Poisoning | Unkeyed header injection | ✅ |
+| JWT Attacks | None alg, weak secrets, confusion | ✅ |
+| CORS Testing | Origin reflection, bypass | ✅ |
+| Timing Analysis | Blind injection via timing | ✅ |
 
 ---
 

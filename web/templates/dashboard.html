@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>Dashboard</h1>
+
+<div class="grid grid-4" style="margin-bottom: 2rem;">
+    <div class="card metric">
+        <div class="metric-value" id="metric-zap">{{ 'Running' if zap_status.running else 'Stopped' }}</div>
+        <div class="metric-label">ZAP Status</div>
+        {% if zap_status.running %}
+        <div class="metric-delta positive">v{{ zap_status.version }}</div>
+        {% endif %}
+    </div>
+
+    <div class="card metric">
+        <div class="metric-value">{{ active_scans|length }}</div>
+        <div class="metric-label">Active Scans</div>
+    </div>
+
+    <div class="card metric">
+        <div class="metric-value">{{ zap_status.alerts_count or 0 }}</div>
+        <div class="metric-label">Alerts</div>
+        {% if high_alerts %}
+        <div class="metric-delta negative">{{ high_alerts }} High</div>
+        {% endif %}
+    </div>
+
+    <div class="card metric">
+        <div class="metric-value">{{ 'Connected' if tor_status.connected else 'Offline' }}</div>
+        <div class="metric-label">TOR</div>
+        {% if tor_status.connected %}
+        <div class="metric-delta">{{ tor_status.exit_ip[:15] }}</div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="grid grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>ZAP Control</h2>
+        </div>
+
+        {% if not zap_status.running %}
+        <button class="btn btn-primary" onclick="startZap()">Start ZAP</button>
+        {% else %}
+        <div style="display: flex; gap: 1rem;">
+            <button class="btn btn-danger" onclick="stopZap()">Stop ZAP</button>
+            <a href="/scans" class="btn btn-secondary">View Scans</a>
+        </div>
+
+        <div style="margin-top: 1rem;">
+            <p><strong>URL:</strong> {{ zap_status.zap_url }}</p>
+            <p><strong>URLs scanned:</strong> {{ zap_status.urls_count or 0 }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>TOR Proxy</h2>
+        </div>
+
+        {% if not tor_status.connected %}
+        <div class="alert alert-warning">
+            TOR not connected ({{ tor_host }}:{{ tor_port }})
+        </div>
+        <a href="/tor" class="btn btn-secondary">Configure TOR</a>
+        {% else %}
+        <div class="alert alert-success">
+            Connected - Exit IP: {{ tor_status.exit_ip }}
+        </div>
+        <div style="display: flex; gap: 1rem;">
+            <button class="btn btn-primary" onclick="newTorCircuit()">New Circuit</button>
+            {% if zap_status.running %}
+            <button class="btn btn-success" onclick="enableTorInZap()">Enable in ZAP</button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if active_scans %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>Active Scans</h2>
+    </div>
+
+    {% for scan in active_scans %}
+    <div id="scan-{{ scan.id }}" style="margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+            <span>Scan #{{ scan.id }}</span>
+            <span class="scan-status">{{ scan.state }} - {{ scan.progress }}%</span>
+        </div>
+        <div class="progress">
+            <div class="progress-bar" style="width: {{ scan.progress }}%"></div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if alerts %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>Recent Alerts</h2>
+    </div>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Risk</th>
+                <th>Alert</th>
+                <th>URL</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alert in alerts[:10] %}
+            <tr>
+                <td>
+                    <span class="badge badge-{{ alert.risk|lower }}">{{ alert.risk }}</span>
+                </td>
+                <td>{{ alert.alert }}</td>
+                <td>{{ alert.url[:50] }}...</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% for scan in active_scans %}
+initScanWebSocket('{{ scan.id }}');
+{% endfor %}
+</script>
+{% endblock %}

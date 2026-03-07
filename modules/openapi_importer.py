@@ -1,41 +1,65 @@
+"""
+OpenAPI/Swagger Importer
+
+Supports loading OpenAPI specs via ZAP or direct HTTP requests.
+"""
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urljoin
 
-import requests
 import yaml
+
+if TYPE_CHECKING:
+    from modules.zap_http_client import ZAPHttpClient
 
 
 class OpenAPIImporter:
     """Import and parse OpenAPI/Swagger specifications for ZAP scanning"""
 
-    def __init__(self, zap_client=None):
+    def __init__(self, zap_client=None, http_client: 'ZAPHttpClient' = None):
         self.zap = zap_client
+        self.http_client = http_client
+        self._use_zap = http_client is not None
         self.spec = None
         self.endpoints = []
 
+    def _get(self, url: str) -> Optional[Dict]:
+        """HTTP GET via ZAP or fallback"""
+        try:
+            if self._use_zap:
+                resp = self.http_client.get(url, timeout=10)
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': resp.headers, 'text': resp.text}
+            else:
+                import requests
+                resp = requests.get(url, timeout=10, verify=False)
+                resp.raise_for_status()
+                return {'status_code': resp.status_code, 'content': resp.content,
+                        'headers': dict(resp.headers), 'text': resp.text}
+        except Exception as e:
+            return {'error': str(e)}
+
     def load_from_url(self, url: str) -> Dict:
         """Load OpenAPI spec from URL"""
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
+        response = self._get(url)
 
-            content_type = response.headers.get('Content-Type', '')
+        if response is None or 'error' in response:
+            error_msg = response.get('error', 'Unknown error') if response else 'No response'
+            raise Exception(f"Failed to load OpenAPI spec from URL: {error_msg}")
 
-            if 'json' in content_type:
-                self.spec = response.json()
-            elif 'yaml' in content_type or 'yml' in url:
-                self.spec = yaml.safe_load(response.text)
-            else:
-                try:
-                    self.spec = response.json()
-                except Exception:  # Broad exception for robustness
-                    self.spec = yaml.safe_load(response.text)
+        content_type = response['headers'].get('Content-Type', '')
 
-            return self.spec
+        if 'json' in content_type:
+            self.spec = json.loads(response['text'])
+        elif 'yaml' in content_type or 'yml' in url:
+            self.spec = yaml.safe_load(response['text'])
+        else:
+            try:
+                self.spec = json.loads(response['text'])
+            except Exception:
+                self.spec = yaml.safe_load(response['text'])
 
-        except Exception as e:
-            raise Exception(f"Failed to load OpenAPI spec from URL: {e}")
+        return self.spec
 
     def load_from_file(self, file_path: str) -> Dict:
         """Load OpenAPI spec from file"""

@@ -233,6 +233,43 @@ python cli.py scan traffic.har
 
 ---
 
+### `advanced` - Advanced Attack Testing
+
+```bash
+python cli.py advanced HAR_FILE [OPTIONS]
+
+Arguments:
+  HAR_FILE              HAR file to analyze
+
+Options:
+  -o, --output DIR      Output directory
+  --smuggling           Test HTTP request smuggling (CL.TE, TE.CL)
+  --cache-poison        Test web cache poisoning
+  --jwt                 Test JWT vulnerabilities (none alg, weak secrets)
+  --cors                Test CORS misconfigurations
+  --timing              Test blind injection via timing analysis (slow)
+  --all                 Run all tests except timing
+  --webhook TYPE        Notification: slack, teams, discord
+```
+
+#### Examples
+
+```bash
+# Run all advanced tests
+python cli.py advanced traffic.har --all
+
+# Test specific vulnerabilities
+python cli.py advanced traffic.har --jwt --cors
+
+# Full suite with timing (slow)
+python cli.py advanced traffic.har --all --timing
+
+# With notifications
+python cli.py advanced api.har --jwt --webhook slack
+```
+
+---
+
 ## Next Steps
 
 → [Modules API](MODULES.md)

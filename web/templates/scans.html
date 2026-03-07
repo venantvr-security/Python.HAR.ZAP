@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Scans - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>Scans</h1>
+
+{% if not zap_status.running %}
+<div class="alert alert-warning">
+    ZAP is not running. <a href="/">Start ZAP from Dashboard</a>
+</div>
+{% else %}
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h2>New Scan</h2>
+    </div>
+
+    <form action="/api/v1/scans" method="POST" id="scan-form">
+        <div class="form-group">
+            <label for="target_url">Target URL</label>
+            <input type="url" class="form-control" id="target_url" name="target_url" placeholder="https://example.com" required>
+        </div>
+
+        <div class="grid grid-2">
+            <div class="form-group">
+                <label for="scan_type">Scan Type</label>
+                <select class="form-control" id="scan_type" name="scan_type">
+                    <option value="spider">Spider Only</option>
+                    <option value="active">Active Scan</option>
+                    <option value="full">Spider + Active</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="policy">Scan Policy</label>
+                <select class="form-control" id="policy" name="policy">
+                    <option value="default">Default</option>
+                    <option value="sqli">SQL Injection Focus</option>
+                    <option value="xss">XSS Focus</option>
+                </select>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Start Scan</button>
+    </form>
+</div>
+
+{% if active_scans %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h2>Active Scans</h2>
+    </div>
+
+    {% for scan in active_scans %}
+    <div id="scan-{{ scan.id }}" style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong>Scan #{{ scan.id }}</strong>
+            <span class="scan-status badge badge-{{ 'info' if scan.state == 'running' else 'low' }}">
+                {{ scan.state }} - {{ scan.progress }}%
+            </span>
+        </div>
+        <div class="progress">
+            <div class="progress-bar" style="width: {{ scan.progress }}%"></div>
+        </div>
+        {% if scan.state == 'running' %}
+        <button class="btn btn-danger" style="margin-top: 0.5rem;" onclick="stopScan('{{ scan.id }}')">Stop</button>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <h2>Alerts Summary</h2>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom: 1rem;">
+        <div class="metric">
+            <div class="metric-value" style="color: var(--danger);">{{ alerts.high }}</div>
+            <div class="metric-label">High</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value" style="color: var(--warning);">{{ alerts.medium }}</div>
+            <div class="metric-label">Medium</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value" style="color: var(--accent);">{{ alerts.low }}</div>
+            <div class="metric-label">Low</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">{{ alerts.info }}</div>
+            <div class="metric-label">Info</div>
+        </div>
+    </div>
+
+    {% if recent_alerts %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Risk</th>
+                <th>Alert</th>
+                <th>URL</th>
+                <th>Param</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for alert in recent_alerts %}
+            <tr>
+                <td><span class="badge badge-{{ alert.risk|lower }}">{{ alert.risk }}</span></td>
+                <td>{{ alert.alert }}</td>
+                <td>{{ alert.url[:40] }}...</td>
+                <td>{{ alert.param or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('scan-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        url: form.target_url.value,
+        policy: form.policy.value
+    };
+
+    try {
+        const result = await apiPost('/scans', data);
+        showAlert('success', 'Scan started: #' + result.scan_id);
+        location.reload();
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+});
+
+async function stopScan(scanId) {
+    try {
+        await api('/scans/' + scanId, { method: 'DELETE' });
+        showAlert('success', 'Scan stopped');
+        location.reload();
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+}
+
+{% for scan in active_scans %}
+initScanWebSocket('{{ scan.id }}');
+{% endfor %}
+</script>
+{% endblock %}

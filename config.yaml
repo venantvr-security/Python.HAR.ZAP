@@ -375,3 +375,28 @@ reporting:
   include_curl: true
   include_timeline: true
   executive_summary: true
+
+# =============================================================================
+# PROXY CHAIN / TOR
+# =============================================================================
+proxy_chain:
+  enabled: false
+  type: "socks5"        # socks4, socks5, http
+  host: "127.0.0.1"
+  port: 9050            # TOR default SOCKS port
+  username: ""          # Optional auth
+  password: ""
+
+tor:
+  control_port: 9051
+  control_password: ""  # Hashed password for control
+  new_circuit_per_scan: false
+  verify_connection: true
+
+# =============================================================================
+# WEB INTERFACE
+# =============================================================================
+web:
+  api_port: 8000
+  streamlit_port: 8501
+  enable_websockets: true

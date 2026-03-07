@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}TOR Configuration - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>TOR Configuration</h1>
+
+<p style="color: var(--text-secondary); margin-bottom: 2rem;">
+    Route scan traffic through the TOR network for anonymization.
+</p>
+
+<div class="grid grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Connection Status</h2>
+        </div>
+
+        {% if tor_status.connected %}
+        <div class="alert alert-success">TOR Connected</div>
+
+        <div class="grid grid-2" style="margin-top: 1rem;">
+            <div class="metric">
+                <div class="metric-value" style="font-size: 1.25rem;">{{ tor_status.exit_ip }}</div>
+                <div class="metric-label">Exit IP</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" style="font-size: 1.25rem;">{{ tor_status.port }}</div>
+                <div class="metric-label">SOCKS Port</div>
+            </div>
+        </div>
+
+        {% if tor_status.tor_detected %}
+        <p style="color: var(--success); font-size: 0.875rem; margin-top: 1rem;">
+            TOR network confirmed via check.torproject.org
+        </p>
+        {% else %}
+        <p style="color: var(--warning); font-size: 0.875rem; margin-top: 1rem;">
+            SOCKS proxy connected but TOR not confirmed
+        </p>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-danger">TOR Not Connected</div>
+        <p style="color: var(--text-secondary);">
+            Trying {{ tor_host }}:{{ tor_port }}
+        </p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Quick Actions</h2>
+        </div>
+
+        {% if tor_status.connected %}
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+            <button class="btn btn-primary" onclick="newTorCircuit()">New Circuit</button>
+            <button class="btn btn-secondary" onclick="checkTorConnection().then(r => showAlert(r.connected ? 'success' : 'danger', 'IP: ' + (r.exit_ip || 'N/A')))">
+                Check IP
+            </button>
+        </div>
+        {% else %}
+        <p style="color: var(--text-secondary);">Connect to TOR first</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>Configuration</h2>
+    </div>
+
+    <form action="/tor/configure" method="POST">
+        <div class="grid grid-2">
+            <div class="form-group">
+                <label for="host">TOR Host</label>
+                <input type="text" class="form-control" id="host" name="host" value="{{ tor_host }}">
+            </div>
+
+            <div class="form-group">
+                <label for="port">SOCKS Port</label>
+                <input type="number" class="form-control" id="port" name="port" value="{{ tor_port }}" min="1" max="65535">
+            </div>
+
+            <div class="form-group">
+                <label for="control_port">Control Port</label>
+                <input type="number" class="form-control" id="control_port" name="control_port" value="{{ control_port }}" min="1" max="65535">
+            </div>
+
+            <div class="form-group">
+                <label for="control_password">Control Password</label>
+                <input type="password" class="form-control" id="control_password" name="control_password" placeholder="Optional">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Apply Configuration</button>
+    </form>
+</div>
+
+{% if zap_status.running %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>ZAP Integration</h2>
+    </div>
+
+    <p style="margin-bottom: 1rem;">ZAP running on {{ zap_status.zap_url }}</p>
+
+    <div style="display: flex; gap: 1rem;">
+        <button class="btn btn-success" onclick="enableTorInZap()" {% if not tor_status.connected %}disabled{% endif %}>
+            Enable TOR in ZAP
+        </button>
+        <button class="btn btn-secondary" onclick="disableTorInZap()">
+            Disable TOR in ZAP
+        </button>
+    </div>
+
+    {% if not tor_status.connected %}
+    <p style="color: var(--warning); font-size: 0.875rem; margin-top: 1rem;">
+        Connect to TOR first before enabling in ZAP
+    </p>
+    {% endif %}
+</div>
+{% else %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>ZAP Integration</h2>
+    </div>
+    <p style="color: var(--text-secondary);">Start ZAP from the Dashboard to enable TOR integration.</p>
+    <a href="/" class="btn btn-secondary" style="margin-top: 1rem;">Go to Dashboard</a>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>Help</h2>
+    </div>
+
+    <details>
+        <summary style="cursor: pointer; color: var(--accent);">Installation Instructions</summary>
+        <div class="markdown-content" style="margin-top: 1rem;">
+            <h3>Linux (Ubuntu/Debian)</h3>
+            <pre><code>sudo apt update && sudo apt install tor
+sudo systemctl start tor</code></pre>
+
+            <h3>macOS</h3>
+            <pre><code>brew install tor
+brew services start tor</code></pre>
+
+            <h3>Docker</h3>
+            <pre><code>docker run -d --name tor -p 9050:9050 -p 9051:9051 dperson/torproxy</code></pre>
+        </div>
+    </details>
+
+    <details style="margin-top: 1rem;">
+        <summary style="cursor: pointer; color: var(--accent);">Control Port Setup</summary>
+        <div class="markdown-content" style="margin-top: 1rem;">
+            <p>Edit <code>/etc/tor/torrc</code>:</p>
+            <pre><code>ControlPort 9051
+HashedControlPassword 16:YOUR_HASH</code></pre>
+
+            <p>Generate hash:</p>
+            <pre><code>tor --hash-password your_password</code></pre>
+        </div>
+    </details>
+
+    <details style="margin-top: 1rem;">
+        <summary style="cursor: pointer; color: var(--accent);">Manual Verification</summary>
+        <div class="markdown-content" style="margin-top: 1rem;">
+            <pre><code>curl --socks5 127.0.0.1:9050 https://check.torproject.org/api/ip</code></pre>
+        </div>
+    </details>
+</div>
+
+{% endblock %}

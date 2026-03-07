@@ -1,5 +1,261 @@
 # Architecture Overview
 
+## Diagrammes de Flux
+
+### Vue d'ensemble du système
+
+```mermaid
+graph TB
+    subgraph Client
+        Browser[Browser]
+    end
+
+    subgraph "HAR-ZAP Web"
+        FastAPI[FastAPI Server :8000]
+        Templates[Jinja2 Templates]
+        WebSocket[WebSocket Handler]
+    end
+
+    subgraph Services
+        ZAPService[ZAP Service]
+        TORService[TOR Service]
+        DocService[Doc Service]
+    end
+
+    subgraph "OWASP ZAP"
+        ZAPDocker[ZAP Docker Container]
+        ZAPAPI[ZAP API :8080]
+        Spider[Spider]
+        ActiveScan[Active Scanner]
+        Alerts[Alerts DB]
+    end
+
+    subgraph "TOR Network"
+        TORProxy[TOR SOCKS5 :9050]
+        TORControl[Control Port :9051]
+    end
+
+    Browser -->|HTTP/WS| FastAPI
+    FastAPI --> Templates
+    FastAPI --> WebSocket
+    FastAPI --> ZAPService
+    FastAPI --> TORService
+    FastAPI --> DocService
+
+    ZAPService -->|ZAPv2 API| ZAPAPI
+    ZAPAPI --> Spider
+    ZAPAPI --> ActiveScan
+    Spider --> Alerts
+    ActiveScan --> Alerts
+
+    TORService -->|SOCKS5| TORProxy
+    TORService -->|NEWNYM| TORControl
+
+    ZAPDocker -.->|proxy_chain| TORProxy
+```
+
+### Flux de Scan
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant W as Web UI
+    participant API as FastAPI
+    participant ZS as ZAPService
+    participant ZAP as ZAP Container
+    participant T as Target
+
+    U->>W: Upload HAR / Enter URL
+    W->>API: POST /api/v1/scans
+    API->>ZS: start_scan(target)
+    ZS->>ZAP: spider.scan(url)
+
+    loop Spider Progress
+        ZAP->>T: HTTP Requests
+        T-->>ZAP: Responses
+        ZAP-->>ZS: Progress updates
+        ZS-->>API: WebSocket push
+        API-->>W: Real-time progress
+    end
+
+    ZS->>ZAP: ascan.scan(url)
+
+    loop Active Scan
+        ZAP->>T: Attack payloads
+        T-->>ZAP: Responses
+        ZAP->>ZAP: Analyze for vulns
+        ZAP-->>ZS: New alerts
+        ZS-->>API: WebSocket push
+        API-->>W: Live alerts
+    end
+
+    ZS->>ZAP: core.alerts()
+    ZAP-->>ZS: All alerts
+    ZS-->>API: Scan complete
+    API-->>W: Final results
+    W-->>U: Display report
+```
+
+### Flux TOR (Anonymisation)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant API as FastAPI
+    participant TS as TORService
+    participant TOR as TOR Daemon
+    participant ZAP as ZAP Container
+    participant T as Target
+
+    U->>API: POST /api/v1/proxy/tor/enable
+    API->>TS: configure_zap_proxy()
+    TS->>TOR: Check SOCKS5 :9050
+    TOR-->>TS: Connected
+    TS->>ZAP: network.setConnectionOptions(socks5)
+    ZAP-->>TS: Configured
+    TS-->>API: TOR enabled
+    API-->>U: Success + Exit IP
+
+    Note over ZAP,T: All scan traffic now routed through TOR
+
+    U->>API: POST /api/v1/proxy/tor/new-circuit
+    API->>TS: new_circuit()
+    TS->>TOR: SIGNAL NEWNYM (port 9051)
+    TOR-->>TS: New circuit established
+    TS->>TOR: Get new exit IP
+    TOR-->>TS: New IP
+    TS-->>API: New IP
+    API-->>U: Circuit changed
+```
+
+### Pipeline HAR Processing
+
+```mermaid
+flowchart LR
+    subgraph Input
+        HAR[HAR File]
+    end
+
+    subgraph Preprocessing
+        HP[HARPreprocessor]
+        TE[TokenExtractor]
+        HA[HARAnalyzer]
+    end
+
+    subgraph Analysis
+        ID[IDOR Detector]
+        RT[RedTeam Attacks]
+        PA[Passive Analysis]
+    end
+
+    subgraph ZAP Integration
+        ZS[ZAPScanner]
+        ZF[ZAPFuzzer]
+        ZH[ZAPHttpClient]
+    end
+
+    subgraph Output
+        AL[Alerts]
+        RP[Report]
+    end
+
+    HAR --> HP
+    HP --> TE
+    HP --> HA
+    HA --> ID
+    HA --> RT
+    HA --> PA
+
+    TE --> ZF
+    HA --> ZS
+
+    ZS --> ZH
+    ZF --> ZH
+    RT --> ZH
+
+    ZH --> AL
+    ID --> AL
+    PA --> AL
+    AL --> RP
+```
+
+### Structure des Composants Web
+
+```mermaid
+graph TB
+    subgraph "web/"
+        subgraph "api/"
+            main[main.py]
+            subgraph "routes/"
+                r_zap[zap.py]
+                r_scans[scans.py]
+                r_tor[tor.py]
+                r_config[config.py]
+                r_docs[docs.py]
+            end
+            subgraph "websockets/"
+                ws_scan[scan_monitor.py]
+            end
+        end
+        subgraph "services/"
+            s_zap[ZAPService]
+            s_tor[TORService]
+            s_doc[DocService]
+        end
+        subgraph "templates/"
+            t_base[base.html]
+            t_dash[dashboard.html]
+            t_wizard[wizard.html]
+            t_tor[tor.html]
+        end
+    end
+
+    subgraph "modules/"
+        m_docker[DockerZAPManager]
+        m_scanner[ZAPScanner]
+        m_fuzzer[ZAPFuzzer]
+        m_http[ZAPHttpClient]
+        m_config[AdvancedZAPConfig]
+    end
+
+    main --> r_zap
+    main --> r_scans
+    main --> r_tor
+    main --> ws_scan
+
+    r_zap --> s_zap
+    r_scans --> s_zap
+    r_tor --> s_tor
+    r_docs --> s_doc
+
+    s_zap --> m_docker
+    s_zap --> m_scanner
+    s_zap --> m_fuzzer
+    m_scanner --> m_http
+    m_fuzzer --> m_http
+    s_tor --> m_config
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Dashboard |
+| `/wizard` | GET | Onboarding wizard |
+| `/tor` | GET | TOR configuration |
+| `/scans` | GET | Scans management |
+| `/api/v1/zap/status` | GET | ZAP status |
+| `/api/v1/zap/start` | POST | Start ZAP container |
+| `/api/v1/zap/stop` | POST | Stop ZAP container |
+| `/api/v1/scans` | GET/POST | List/Create scans |
+| `/api/v1/proxy/tor/status` | GET | TOR status |
+| `/api/v1/proxy/tor/enable` | POST | Enable TOR in ZAP |
+| `/api/v1/proxy/tor/new-circuit` | POST | New TOR circuit |
+| `/api/v1/ws/scans/{id}` | WS | Scan progress stream |
+| `/api/v1/ws/alerts` | WS | Live alerts stream |
+
+---
+
 ## Design Philosophy
 
 **Hybrid Approach: ZAP Native + Custom Business Logic**

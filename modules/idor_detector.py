@@ -1,11 +1,17 @@
+"""
+IDOR (Insecure Direct Object Reference) Detection
+
+All requests routed through ZAP for unified logging and alerting.
+"""
 import difflib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-import requests
+if TYPE_CHECKING:
+    from modules.zap_http_client import ZAPHttpClient
 
 
 class IDORStatus(Enum):
@@ -34,12 +40,62 @@ class IDORDetector:
     MIN_CONTENT_THRESHOLD = 0.5
     FALSE_POSITIVE_THRESHOLD = 0.1
 
-    def __init__(self, session_a_data: Dict, session_b_data: Dict, config: Dict = None):
+    def __init__(self, session_a_data: Dict, session_b_data: Dict, config: Dict = None,
+                 zap_client: 'ZAPHttpClient' = None):
         self.session_a = session_a_data
         self.session_b = session_b_data
         self.config = config or {}
         self.results = []
         self.max_workers = self.config.get('max_workers', 5)
+        self.zap_client = zap_client
+        self._use_zap = zap_client is not None
+
+    def _request(self, method: str, url: str, headers: Dict = None) -> Optional[Dict]:
+        """HTTP request via ZAP or fallback"""
+        try:
+            if self._use_zap:
+                resp = self.zap_client.request(method, url, headers=headers, timeout=10)
+                is_json = 'application/json' in resp.headers.get('Content-Type', '')
+                return {
+                    'status_code': resp.status_code,
+                    'headers': resp.headers,
+                    'content': resp.text,
+                    'content_length': len(resp.content),
+                    'json': resp.json() if is_json else None
+                }
+            else:
+                import requests
+                session = requests.Session()
+                if headers:
+                    session.headers.update(headers)
+                response = session.request(method=method, url=url, timeout=10, verify=False)
+                is_json = 'application/json' in response.headers.get('Content-Type', '')
+                return {
+                    'status_code': response.status_code,
+                    'headers': dict(response.headers),
+                    'content': response.text,
+                    'content_length': len(response.content),
+                    'json': response.json() if is_json else None
+                }
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _raise_alert(self, result: 'IDORTestResult'):
+        """Raise ZAP alert for IDOR finding"""
+        if not self._use_zap or result.status != IDORStatus.VULNERABLE:
+            return
+        self.zap_client.raise_alert(
+            risk=3,  # High
+            confidence=2,
+            name="Insecure Direct Object Reference (IDOR)",
+            description=f"User B can access User A's resource via parameter '{result.proof.get('param')}'",
+            uri=result.url,
+            param=result.proof.get('param', ''),
+            attack=f"Changed {result.proof.get('param')} from {result.proof.get('original_value')} to {result.proof.get('test_value')}",
+            evidence=f"Content ratio: {result.proof.get('content_ratio', 0):.2f}",
+            cwe_id=639,
+            wasc_id=2
+        )
 
     @staticmethod
     def extract_auth_tokens(har_data: Dict) -> Dict[str, str]:
@@ -129,49 +185,11 @@ class IDORDetector:
 
     def execute_baseline_request(self, target: Dict, auth_headers: Dict) -> Optional[Dict]:
         """Execute baseline request with User A credentials"""
-        try:
-            session = requests.Session()
-            session.headers.update(auth_headers)
-
-            response = session.request(
-                method=target['method'],
-                url=target['url'],
-                timeout=10,
-                verify=False
-            )
-
-            return {
-                'status_code': response.status_code,
-                'headers': dict(response.headers),
-                'content': response.text,
-                'content_length': len(response.content),
-                'json': response.json() if self._is_json(response) else None
-            }
-        except Exception as e:
-            return {'error': str(e)}
+        return self._request(target['method'], target['url'], auth_headers)
 
     def execute_cross_user_test(self, variant: Dict, auth_headers_b: Dict) -> Optional[Dict]:
         """Execute test request with User B credentials accessing User A resources"""
-        try:
-            session = requests.Session()
-            session.headers.update(auth_headers_b)
-
-            response = session.request(
-                method=variant['method'],
-                url=variant['url'],
-                timeout=10,
-                verify=False
-            )
-
-            return {
-                'status_code': response.status_code,
-                'headers': dict(response.headers),
-                'content': response.text,
-                'content_length': len(response.content),
-                'json': response.json() if self._is_json(response) else None
-            }
-        except Exception as e:
-            return {'error': str(e)}
+        return self._request(variant['method'], variant['url'], auth_headers_b)
 
     def analyze_responses(self, baseline: Dict, test: Dict, variant: Dict) -> IDORTestResult:
         """Analyze responses to determine IDOR vulnerability"""
@@ -289,6 +307,7 @@ class IDORDetector:
                 if result:
                     results.append(result)
                     if result.status == IDORStatus.VULNERABLE:
+                        self._raise_alert(result)
                         print(f"[IDOR] 🚨 VULNERABLE: {result.url} (confidence: {result.confidence:.2f})")
 
         self.results = results
@@ -299,12 +318,6 @@ class IDORDetector:
         baseline = self.execute_baseline_request(target, auth_a)
         test = self.execute_cross_user_test(variant, auth_b)
         return self.analyze_responses(baseline, test, variant)
-
-    @staticmethod
-    def _is_json(response: requests.Response) -> bool:
-        """Check if response is JSON"""
-        content_type = response.headers.get('Content-Type', '')
-        return 'application/json' in content_type
 
     @staticmethod
     def _calculate_similarity(text1: str, text2: str) -> float:

@@ -30,6 +30,19 @@ ENV_MAPPING = {
     'HARZAP_INCREMENTAL': ('incremental', lambda x: x.lower() in ('true', '1', 'yes')),
 }
 
+# TOR/Proxy environment variable mappings (nested config)
+TOR_ENV_MAPPING = {
+    'HARZAP_TOR_ENABLED': ('proxy_chain', 'enabled', lambda x: x.lower() in ('true', '1', 'yes')),
+    'HARZAP_TOR_HOST': ('proxy_chain', 'host', str),
+    'HARZAP_TOR_PORT': ('proxy_chain', 'port', int),
+    'HARZAP_TOR_TYPE': ('proxy_chain', 'type', str),
+    'HARZAP_TOR_USERNAME': ('proxy_chain', 'username', str),
+    'HARZAP_TOR_PASSWORD': ('proxy_chain', 'password', str),
+    'HARZAP_TOR_CONTROL_PORT': ('tor', 'control_port', int),
+    'HARZAP_TOR_CONTROL_PASSWORD': ('tor', 'control_password', str),
+    'HARZAP_TOR_NEW_CIRCUIT_PER_SCAN': ('tor', 'new_circuit_per_scan', lambda x: x.lower() in ('true', '1', 'yes')),
+}
+
 DEFAULT_CONFIG = {
     'zap_port': 8080,
     'zap_image': 'ghcr.io/zaproxy/zaproxy:stable',
@@ -91,6 +104,17 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             except ValueError as e:
                 logger.warning("env_parse_error", var=env_var, error=str(e))
 
+    # Apply TOR/Proxy environment overrides (nested)
+    for env_var, (section, key, converter) in TOR_ENV_MAPPING.items():
+        if env_var in os.environ:
+            try:
+                if section not in config:
+                    config[section] = {}
+                config[section][key] = converter(os.environ[env_var])
+                logger.debug("env_override", key=f"{section}.{key}", source=env_var)
+            except ValueError as e:
+                logger.warning("env_parse_error", var=env_var, error=str(e))
+
     return config
 
 
@@ -134,4 +158,23 @@ def get_rate_limiter_config(config: Dict) -> Dict[str, Any]:
     return {
         'requests_per_second': config['rate_limit'],
         'burst': config['rate_burst'],
+    }
+
+
+def get_tor_config(config: Dict) -> Dict[str, Any]:
+    """Extract TOR/proxy config."""
+    proxy_chain = config.get('proxy_chain', {})
+    tor = config.get('tor', {})
+
+    return {
+        'enabled': proxy_chain.get('enabled', False),
+        'type': proxy_chain.get('type', 'socks5'),
+        'host': proxy_chain.get('host', '127.0.0.1'),
+        'port': proxy_chain.get('port', 9050),
+        'username': proxy_chain.get('username', ''),
+        'password': proxy_chain.get('password', ''),
+        'control_port': tor.get('control_port', 9051),
+        'control_password': tor.get('control_password', ''),
+        'new_circuit_per_scan': tor.get('new_circuit_per_scan', False),
+        'verify_connection': tor.get('verify_connection', True),
     }

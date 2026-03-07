@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}HAR-ZAP{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">HAR-ZAP</div>
+        <div class="nav-links">
+            <a href="/" class="{% if active == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="/wizard" class="{% if active == 'wizard' %}active{% endif %}">Onboarding</a>
+            <a href="/tor" class="{% if active == 'tor' %}active{% endif %}">TOR Config</a>
+            <a href="/scans" class="{% if active == 'scans' %}active{% endif %}">Scans</a>
+            <a href="/docs" class="{% if active == 'docs' %}active{% endif %}">Docs</a>
+        </div>
+        <div class="nav-status">
+            <span id="zap-status" class="status-badge offline">ZAP</span>
+            <span id="tor-status" class="status-badge offline">TOR</span>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

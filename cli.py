@@ -127,6 +127,29 @@ Examples:
                               help='Clear entries older than N days')
     cache_parser.add_argument('-o', '--output', help='Export output file')
 
+    # === ADVANCED ATTACKS COMMAND ===
+    adv_parser = subparsers.add_parser('advanced', help='Advanced attack testing')
+    adv_parser.add_argument('har_file', help='HAR file to analyze')
+    adv_parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    adv_parser.add_argument('--smuggling', action='store_true',
+                            help='Test HTTP request smuggling (CL.TE, TE.CL)')
+    adv_parser.add_argument('--cache-poison', action='store_true',
+                            help='Test web cache poisoning')
+    adv_parser.add_argument('--jwt', action='store_true',
+                            help='Test JWT vulnerabilities (none alg, weak secrets)')
+    adv_parser.add_argument('--cors', action='store_true',
+                            help='Test CORS misconfigurations')
+    adv_parser.add_argument('--timing', action='store_true',
+                            help='Test blind injection via timing analysis (slow)')
+    adv_parser.add_argument('--all', action='store_true',
+                            help='Run all advanced tests (except timing)')
+    adv_parser.add_argument('--no-docker', action='store_true',
+                            help='Use existing ZAP instance')
+    adv_parser.add_argument('--zap-url', default='http://localhost:8080',
+                            help='ZAP URL if using existing instance')
+    adv_parser.add_argument('--api-key', help='ZAP API key')
+    adv_parser.add_argument('--webhook', help='Webhook type: slack, teams, discord')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -143,6 +166,8 @@ Examples:
         return run_idor(args)
     elif args.command == 'cache':
         return run_cache(args)
+    elif args.command == 'advanced':
+        return run_advanced(args)
 
     return 0
 
@@ -493,6 +518,137 @@ def run_cache(args):
         print(f"Exported {count} entries to {output}")
 
     cache.close()
+    return 0
+
+
+def run_advanced(args):
+    """Execute advanced attack testing - all requests via ZAP."""
+    if not Path(args.har_file).exists():
+        print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
+        return 1
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+
+    print("[1/3] Loading HAR file...")
+    with open(args.har_file) as f:
+        har_data = json.load(f)
+
+    config = load_config()
+    results = {}
+    total_vulns = 0
+    docker_manager = None
+    zap_client = None
+
+    # Determine which tests to run
+    run_all = args.all
+    run_smuggling = args.smuggling or run_all
+    run_cache_poison = args.cache_poison or run_all
+    run_jwt = args.jwt or run_all
+    run_cors = args.cors or run_all
+    run_timing = args.timing  # Not included in --all (slow)
+
+    if not any([run_smuggling, run_cache_poison, run_jwt, run_cors, run_timing]):
+        print("No tests selected. Use --all or specific flags (--smuggling, --jwt, etc.)")
+        return 1
+
+    try:
+        # Initialize ZAP
+        print("[2/3] Initializing ZAP proxy...")
+        if not args.no_docker:
+            docker_manager = DockerZAPManager(config)
+            zap_config = docker_manager.start_zap()
+            zap_url = zap_config['zap_url']
+            api_key = zap_config.get('api_key', '')
+        else:
+            zap_url = args.zap_url
+            api_key = args.api_key or ''
+
+        # Create ZAP HTTP client
+        from modules.zap_http_client import ZAPHttpClient
+        zap_client = ZAPHttpClient(zap_url=zap_url, api_key=api_key)
+
+        print("[3/3] Running advanced attacks via ZAP...")
+
+        # HTTP Smuggling (uses raw sockets, not ZAP)
+        if run_smuggling:
+            from modules.http_smuggling import HTTPSmugglingTester
+            tester = HTTPSmugglingTester(har_data, config)
+            smuggling_results = tester.run_tests()
+            results['http_smuggling'] = tester.generate_report(smuggling_results)
+            vuln_count = len([r for r in smuggling_results if r.vulnerable])
+            total_vulns += vuln_count
+            print(f"  HTTP Smuggling: {vuln_count} findings")
+
+        # Cache Poisoning
+        if run_cache_poison:
+            from modules.cache_poisoning import CachePoisoningTester
+            tester = CachePoisoningTester(har_data, config, zap_client=zap_client)
+            poison_results = tester.run_tests()
+            results['cache_poisoning'] = tester.generate_report(poison_results)
+            vuln_count = len([r for r in poison_results if r.vulnerable])
+            total_vulns += vuln_count
+            print(f"  Cache Poisoning: {vuln_count} findings")
+
+        # JWT Attacks
+        if run_jwt:
+            from modules.jwt_attacks import JWTAttackTester
+            tester = JWTAttackTester(har_data, config, zap_client=zap_client)
+            jwt_results = tester.run_tests()
+            results['jwt_attacks'] = tester.generate_report(jwt_results)
+            vuln_count = len([r for r in jwt_results if r.vulnerable])
+            total_vulns += vuln_count
+            print(f"  JWT Attacks: {vuln_count} findings")
+
+        # CORS Misconfiguration
+        if run_cors:
+            from modules.cors_tester import CORSTester
+            tester = CORSTester(har_data, config, zap_client=zap_client)
+            cors_results = tester.run_tests()
+            results['cors'] = tester.generate_report(cors_results)
+            vuln_count = len([r for r in cors_results if r.vulnerable])
+            total_vulns += vuln_count
+            print(f"  CORS: {vuln_count} findings")
+
+        # Timing Analysis
+        if run_timing:
+            from modules.timing_analysis import TimingAnalyzer
+            tester = TimingAnalyzer(har_data, config, zap_client=zap_client)
+            timing_results = tester.run_tests()
+            results['timing_analysis'] = tester.generate_report(timing_results)
+            vuln_count = len([r for r in timing_results if r.vulnerable])
+            total_vulns += vuln_count
+            print(f"  Timing Analysis: {vuln_count} findings")
+
+        # Get alerts from ZAP
+        if zap_client:
+            zap_alerts = zap_client.get_alerts()
+            results['zap_alerts_count'] = len(zap_alerts)
+
+    finally:
+        if docker_manager:
+            docker_manager.stop_zap()
+
+    # Save results
+    output_file = Path(args.output) / 'advanced_attacks.json'
+    with open(output_file, 'w') as f:
+        json.dump({
+            'total_vulnerabilities': total_vulns,
+            'results': results
+        }, f, indent=2)
+
+    print(f"\nTotal vulnerabilities: {total_vulns}")
+    print(f"Results saved: {output_file}")
+
+    # Webhook notification
+    if args.webhook and total_vulns > 0:
+        notifier = NotificationManager({'webhooks': [{'type': args.webhook, 'url': '', 'events': ['all']}]})
+        notifier.notify_critical_finding({
+            'name': 'Advanced Attack Findings',
+            'risk': 'High',
+            'description': f'{total_vulns} vulnerabilities found in advanced testing',
+            'url': args.har_file
+        })
+
     return 0
 
 

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Documentation - HAR-ZAP{% endblock %}
+
+{% block content %}
+<h1>Documentation</h1>
+
+<div class="grid grid-3" style="margin-bottom: 2rem;">
+    {% for doc in docs %}
+    <a href="/docs/{{ doc.path }}" class="card" style="text-decoration: none; color: inherit;">
+        <h3>{{ doc.title }}</h3>
+        <p style="color: var(--text-secondary); font-size: 0.875rem;">{{ doc.category }}</p>
+    </a>
+    {% endfor %}
+</div>
+
+{% if current_doc %}
+<div class="card">
+    <div class="card-header">
+        <h2>{{ current_doc.title }}</h2>
+        <a href="/docs" class="btn btn-secondary">Back</a>
+    </div>
+
+    <div class="markdown-content">
+        {{ current_doc.content|safe }}
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

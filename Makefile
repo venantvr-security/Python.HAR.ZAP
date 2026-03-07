@@ -1,4 +1,4 @@
-.PHONY: help venv install install-dev test test-unit test-bdd test-cov test-fast lint format clean run docker-up docker-down docker-clean
+.PHONY: help venv install install-dev test test-unit test-bdd test-cov test-fast lint format clean run run-dev docker-up docker-down docker-clean tor-up tor-down tor-status tor-newcircuit status
 
 # Variables
 VENV := .venv
@@ -6,9 +6,10 @@ PYTHON := $(VENV)/bin/python3
 PIP := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
 BEHAVE := $(VENV)/bin/behave
-STREAMLIT := $(VENV)/bin/streamlit
+UVICORN := $(VENV)/bin/uvicorn
 DOCKER := docker
 COMPOSE := docker-compose
+PORT := 8000
 
 # Détection si venv existe
 VENV_EXISTS := $(shell [ -d $(VENV) ] && echo 1 || echo 0)
@@ -175,13 +176,21 @@ clean-venv: clean ## Supprime également le virtualenv
 	rm -rf $(VENV)
 	@echo "$(GREEN)✓ Virtualenv supprimé$(NC)"
 
-run: ## Lance l'interface web Streamlit
+run: ## Lance l'interface web FastAPI
 	@if [ ! -d "$(VENV)" ]; then \
 		echo "$(RED)✗ Virtualenv non trouvé. Lancez 'make install' d'abord$(NC)"; \
 		exit 1; \
 	fi
-	@echo "$(BLUE)Démarrage de l'interface web...$(NC)"
-	$(STREAMLIT) run app.py
+	@echo "$(BLUE)Démarrage de l'interface web sur http://localhost:$(PORT)...$(NC)"
+	$(UVICORN) web.api.main:app --host 0.0.0.0 --port $(PORT)
+
+run-dev: ## Lance l'interface web en mode développement (hot reload)
+	@if [ ! -d "$(VENV)" ]; then \
+		echo "$(RED)✗ Virtualenv non trouvé. Lancez 'make install' d'abord$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Démarrage en mode dev sur http://localhost:$(PORT)...$(NC)"
+	$(UVICORN) web.api.main:app --host 0.0.0.0 --port $(PORT) --reload
 
 run-cli: ## Lance le scanner en CLI (nécessite HAR_FILE)
 	@if [ ! -d "$(VENV)" ]; then \
@@ -217,6 +226,24 @@ docker-logs: ## Affiche les logs de ZAP Docker
 
 docker-status: ## Vérifie le statut de ZAP Docker
 	@$(DOCKER) ps -a | grep zap || echo "$(YELLOW)ZAP n'est pas en cours d'exécution$(NC)"
+
+tor-up: ## Démarre TOR dans Docker
+	@echo "$(BLUE)Démarrage de TOR Docker...$(NC)"
+	$(DOCKER) run -d -p 9050:9050 -p 9051:9051 --name tor dperson/torproxy
+	@echo "$(GREEN)✓ TOR démarré sur socks5://localhost:9050$(NC)"
+
+tor-down: ## Arrête TOR Docker
+	@echo "$(BLUE)Arrêt de TOR Docker...$(NC)"
+	$(DOCKER) stop tor 2>/dev/null || true
+	$(DOCKER) rm tor 2>/dev/null || true
+	@echo "$(GREEN)✓ TOR arrêté$(NC)"
+
+tor-status: ## Vérifie la connexion TOR
+	@curl -s --socks5 127.0.0.1:9050 https://check.torproject.org/api/ip 2>/dev/null && echo "$(GREEN)✓ TOR connecté$(NC)" || echo "$(RED)✗ TOR non connecté$(NC)"
+
+tor-newcircuit: ## Demande un nouveau circuit TOR
+	@echo -e 'AUTHENTICATE ""\nSIGNAL NEWNYM\nQUIT' | nc 127.0.0.1 9051
+	@echo "$(GREEN)✓ Nouveau circuit demandé$(NC)"
 
 scan: ## Lance un scan complet (web UI + tests)
 	@echo "$(BLUE)Démarrage du scan complet...$(NC)"
@@ -351,6 +378,11 @@ status: ## Affiche le statut de l'environnement
 		echo "$(GREEN)✓ ZAP Docker: en cours d'exécution$(NC)"; \
 	else \
 		echo "$(YELLOW)⚠ ZAP Docker: arrêté$(NC)"; \
+	fi
+	@if $(DOCKER) ps | grep -q tor; then \
+		echo "$(GREEN)✓ TOR Docker: en cours d'exécution$(NC)"; \
+	else \
+		echo "$(YELLOW)⚠ TOR Docker: arrêté$(NC)"; \
 	fi
 
 all: clean-venv venv install test ## Setup complet: clean + venv + install + test
