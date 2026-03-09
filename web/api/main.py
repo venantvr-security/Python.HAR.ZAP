@@ -120,7 +120,14 @@ async def wizard(request: Request, step: int = 0):
 
     steps = doc_svc.get_wizard_steps() if doc_svc else []
     current_step = max(0, min(step, len(steps) - 1)) if steps else 0
-    step_data = steps[current_step] if steps else {'title': 'No steps', 'content': ''}
+    step_data = steps[current_step].copy() if steps else {'title': 'No steps', 'content': ''}
+
+    # Convert markdown to HTML
+    if step_data.get('content'):
+        step_data['content'] = markdown.markdown(
+            step_data['content'],
+            extensions=['fenced_code', 'tables']
+        )
 
     zap_status = zap_svc.get_status() if zap_svc else {'running': False}
     tor_status = tor_svc.get_status() if tor_svc else {'connected': False}
@@ -202,8 +209,8 @@ async def scans_page(request: Request):
     })
 
 
-@app.get("/docs")
-@app.get("/docs/{doc_id}")
+@app.get("/documentation")
+@app.get("/documentation/{doc_id:path}")
 async def docs_page(request: Request, doc_id: str = None):
     """Documentation page"""
     doc_svc = state['doc_service']

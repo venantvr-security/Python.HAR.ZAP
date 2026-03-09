@@ -33,10 +33,21 @@ class ZAPService:
 
     @property
     def is_running(self) -> bool:
-        """Check if ZAP container is running"""
-        if not self.docker_manager:
+        """Check if ZAP is running (managed or external)"""
+        if self.docker_manager and self.docker_manager.container:
+            return True
+        # Check for external ZAP
+        return self._check_external_zap()
+
+    def _check_external_zap(self) -> bool:
+        """Check if ZAP is running externally"""
+        try:
+            import requests
+            port = self.config.get('zap_port', 8080)
+            resp = requests.get(f'http://127.0.0.1:{port}/JSON/core/view/version/', timeout=2)
+            return resp.status_code == 200
+        except Exception:
             return False
-        return self.docker_manager.container is not None
 
     def start(self, config: Dict = None) -> Dict:
         """Start ZAP Docker container"""
@@ -75,6 +86,17 @@ class ZAPService:
         except Exception:
             return False
 
+    def _get_zap_connection(self):
+        """Get ZAP connection details (managed or external)"""
+        if self._zap_config:
+            return self._zap_config
+        # External ZAP defaults
+        port = self.config.get('zap_port', 8080)
+        return {
+            'zap_url': f'http://127.0.0.1:{port}',
+            'api_key': ''
+        }
+
     def get_status(self) -> Dict:
         """Get comprehensive ZAP status"""
         if not self.is_running:
@@ -87,10 +109,10 @@ class ZAPService:
 
         try:
             from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
             zap = ZAPv2(
-                apikey=self._zap_config['api_key'],
-                proxies={'http': self._zap_config['zap_url'],
-                         'https': self._zap_config['zap_url']}
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
             return {
@@ -98,8 +120,8 @@ class ZAPService:
                 'version': zap.core.version,
                 'alerts_count': len(zap.core.alerts()),
                 'urls_count': len(zap.core.urls()),
-                'zap_url': self._zap_config['zap_url'],
-                'api_key': self._zap_config['api_key'][:8] + '...'
+                'zap_url': conn['zap_url'],
+                'api_key': 'external' if not self._zap_config else conn['api_key'][:8] + '...'
             }
         except Exception as e:
             return {
@@ -121,10 +143,10 @@ class ZAPService:
 
         try:
             from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
             zap = ZAPv2(
-                apikey=self._zap_config['api_key'],
-                proxies={'http': self._zap_config['zap_url'],
-                         'https': self._zap_config['zap_url']}
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
             alerts = zap.core.alerts()
@@ -143,10 +165,10 @@ class ZAPService:
 
         try:
             from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
             zap = ZAPv2(
-                apikey=self._zap_config['api_key'],
-                proxies={'http': self._zap_config['zap_url'],
-                         'https': self._zap_config['zap_url']}
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
             scans = []
@@ -171,10 +193,10 @@ class ZAPService:
 
         try:
             from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
             zap = ZAPv2(
-                apikey=self._zap_config['api_key'],
-                proxies={'http': self._zap_config['zap_url'],
-                         'https': self._zap_config['zap_url']}
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
             # Access URL first
@@ -194,10 +216,10 @@ class ZAPService:
 
         try:
             from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
             zap = ZAPv2(
-                apikey=self._zap_config['api_key'],
-                proxies={'http': self._zap_config['zap_url'],
-                         'https': self._zap_config['zap_url']}
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
             progress = int(zap.ascan.status(scan_id))
@@ -223,10 +245,10 @@ class ZAPService:
 
         try:
             from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
             zap = ZAPv2(
-                apikey=self._zap_config['api_key'],
-                proxies={'http': self._zap_config['zap_url'],
-                         'https': self._zap_config['zap_url']}
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
             zap.ascan.stop(scan_id)
