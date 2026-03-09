@@ -59,10 +59,11 @@ class GraphQLVulnerability:
 class GraphQLScanner:
     """Scanner for GraphQL endpoint security testing."""
 
-    def __init__(self, har_data: Dict, config: Optional[Dict] = None):
+    def __init__(self, har_data: Dict, config: Optional[Dict] = None, zap_client=None):
         self.har_data = har_data
         self.config = config or {}
         self.session = create_http_session()
+        self.zap_client = zap_client
         self.endpoints: List[GraphQLEndpoint] = []
         self.vulnerabilities: List[GraphQLVulnerability] = []
 
@@ -74,6 +75,12 @@ class GraphQLScanner:
         self.introspection_timeout = self.config.get('introspection_timeout', 30)
         self.max_depth = self.config.get('max_depth', 10)
         self.batch_limit = self.config.get('batch_limit', 100)
+
+    def _request(self, method: str, url: str, **kwargs) -> Any:
+        """Route request through ZAP if available"""
+        if self.zap_client:
+            return self.zap_client.request(method, url, **kwargs)
+        return getattr(self.session, method.lower())(url, **kwargs)
 
     def detect_endpoints(self) -> List[GraphQLEndpoint]:
         """Detect GraphQL endpoints from HAR data."""
@@ -113,7 +120,8 @@ class GraphQLScanner:
         self.rate_limiter.acquire()
 
         try:
-            response = self.session.post(
+            response = self._request(
+                'POST',
                 endpoint.url,
                 json={'query': INTROSPECTION_QUERY},
                 timeout=self.introspection_timeout,
@@ -168,7 +176,8 @@ class GraphQLScanner:
         self.rate_limiter.acquire()
 
         try:
-            response = self.session.post(
+            response = self._request(
+                'POST',
                 endpoint.url,
                 json={'query': alias_query},
                 timeout=60,
@@ -200,7 +209,8 @@ class GraphQLScanner:
         self.rate_limiter.acquire()
 
         try:
-            response = self.session.post(
+            response = self._request(
+                'POST',
                 endpoint.url,
                 json=array_query,
                 timeout=60,
@@ -228,7 +238,8 @@ class GraphQLScanner:
         self.rate_limiter.acquire()
 
         try:
-            response = self.session.post(
+            response = self._request(
+                'POST',
                 endpoint.url,
                 json={'query': deep_query},
                 timeout=30,
@@ -301,7 +312,8 @@ class GraphQLScanner:
         self.rate_limiter.acquire()
 
         try:
-            response = self.session.post(
+            response = self._request(
+                'POST',
                 endpoint.url,
                 json={'query': query},
                 timeout=10,

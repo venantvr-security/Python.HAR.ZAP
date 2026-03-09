@@ -42,9 +42,12 @@ class WebSocketVulnerability:
 class WebSocketScanner:
     """Scanner for WebSocket endpoint security testing."""
 
-    def __init__(self, har_data: Dict, config: Optional[Dict] = None):
+    def __init__(self, har_data: Dict, config: Optional[Dict] = None, zap_client=None):
         self.har_data = har_data
         self.config = config or {}
+        # Note: zap_client stored but WebSocket tests use websockets library directly
+        # ZAP WebSocket passthrough requires separate configuration
+        self.zap_client = zap_client
         self.endpoints: List[WebSocketEndpoint] = []
         self.vulnerabilities: List[WebSocketVulnerability] = []
 

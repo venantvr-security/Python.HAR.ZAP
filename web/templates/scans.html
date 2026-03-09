@@ -37,8 +37,9 @@
                 <label for="policy">Scan Policy</label>
                 <select class="form-control" id="policy" name="policy">
                     <option value="default">Default</option>
-                    <option value="sqli">SQL Injection Focus</option>
-                    <option value="xss">XSS Focus</option>
+                    {% for policy in scan_policies %}
+                    <option value="{{ policy.name|lower|replace(' ', '_') }}">{{ policy.name }}</option>
+                    {% endfor %}
                 </select>
             </div>
         </div>
@@ -75,6 +76,7 @@
 <div class="card">
     <div class="card-header">
         <h2>Alerts Summary</h2>
+        <button class="btn btn-secondary" onclick="clearSession()">Clear Session</button>
     </div>
 
     <div class="grid grid-4" style="margin-bottom: 1rem;">
@@ -131,8 +133,12 @@ document.getElementById('scan-form')?.addEventListener('submit', async (e) => {
     const form = e.target;
     const data = {
         url: form.target_url.value,
+        scan_type: form.scan_type.value,
         policy: form.policy.value
     };
+
+    // Save choices to localStorage
+    saveFormChoices('scan-form', ['target_url', 'scan_type', 'policy']);
 
     try {
         const result = await apiPost('/scans', data);
@@ -143,10 +149,25 @@ document.getElementById('scan-form')?.addEventListener('submit', async (e) => {
     }
 });
 
+// Restore saved choices on load
+document.addEventListener('DOMContentLoaded', () => {
+    restoreFormChoices('scan-form', ['target_url', 'scan_type', 'policy']);
+});
+
 async function stopScan(scanId) {
     try {
         await api('/scans/' + scanId, { method: 'DELETE' });
         showAlert('success', 'Scan stopped');
+        location.reload();
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+}
+
+async function clearSession() {
+    try {
+        await apiPost('/scans/clear');
+        showAlert('success', 'Session cleared');
         location.reload();
     } catch (err) {
         showAlert('danger', err.message);

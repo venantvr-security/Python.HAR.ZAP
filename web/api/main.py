@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 import markdown
 
-from .routes import zap, scans, config, docs, tor
+from .routes import zap, scans, config, docs, tor, har, attacks
 from .websockets import scan_monitor
 
 # Paths
@@ -30,6 +30,7 @@ state: Dict = {
     'zap_service': None,
     'tor_service': None,
     'doc_service': None,
+    'har_service': None,
     'config': None
 }
 
@@ -41,12 +42,13 @@ async def lifespan(app: FastAPI):
     sys.path.insert(0, str(BASE_DIR.parent))
 
     from modules.config_loader import load_config
-    from web.services import ZAPService, TORService, DocService
+    from web.services import ZAPService, TORService, DocService, HARService
 
     state['config'] = load_config()
     state['zap_service'] = ZAPService(state['config'])
     state['tor_service'] = TORService.from_config(state['config'])
     state['doc_service'] = DocService()
+    state['har_service'] = HARService()
 
     yield
 
@@ -79,6 +81,8 @@ app.include_router(scans.router, prefix="/api/v1/scans", tags=["Scans"])
 app.include_router(config.router, prefix="/api/v1/config", tags=["Config"])
 app.include_router(docs.router, prefix="/api/v1/docs", tags=["Docs"])
 app.include_router(tor.router, prefix="/api/v1/proxy", tags=["TOR"])
+app.include_router(har.router, prefix="/api/v1/har", tags=["HAR"])
+app.include_router(attacks.router, prefix="/api/v1/attacks", tags=["Attacks"])
 app.include_router(scan_monitor.router, prefix="/api/v1/ws", tags=["WebSocket"])
 
 app.state.shared = state
@@ -187,6 +191,7 @@ async def tor_configure(
 async def scans_page(request: Request):
     """Scans page"""
     zap_svc = state['zap_service']
+    config = state['config'] or {}
 
     zap_status = zap_svc.get_status() if zap_svc else {'running': False}
     active_scans = zap_svc.get_active_scans() if zap_svc and zap_status.get('running') else []
@@ -199,9 +204,13 @@ async def scans_page(request: Request):
         'info': len([a for a in all_alerts if a.get('risk') == 'Informational'])
     }
 
+    # Get scan policies from config
+    scan_policies = config.get('scan_policies', [])
+
     return templates.TemplateResponse("scans.html", {
         "request": request,
         "active": "scans",
+        "scan_policies": scan_policies,
         "zap_status": zap_status,
         "active_scans": active_scans,
         "alerts": alerts_summary,
@@ -232,6 +241,42 @@ async def docs_page(request: Request, doc_id: str = None):
         "active": "docs",
         "docs": docs_list,
         "current_doc": current_doc
+    })
+
+
+@app.get("/har")
+async def har_page(request: Request):
+    """HAR upload page"""
+    zap_svc = state['zap_service']
+    har_svc = state['har_service']
+
+    zap_status = zap_svc.get_status() if zap_svc else {'running': False}
+    har_summary = har_svc.get_summary() if har_svc else {'loaded': False}
+
+    return templates.TemplateResponse("har.html", {
+        "request": request,
+        "active": "har",
+        "zap_status": zap_status,
+        "har_summary": har_summary,
+        "har_urls": har_svc.get_urls()[:20] if har_svc else []
+    })
+
+
+@app.get("/attacks")
+async def attacks_page(request: Request):
+    """Advanced attacks page"""
+    har_svc = state['har_service']
+    config = state['config'] or {}
+
+    har_summary = har_svc.get_summary() if har_svc else {'loaded': False}
+    attack_strategies = config.get('attack_strategies', [])
+
+    return templates.TemplateResponse("attacks.html", {
+        "request": request,
+        "active": "attacks",
+        "har_loaded": har_summary.get('loaded', False),
+        "har_summary": har_summary,
+        "attack_strategies": attack_strategies
     })
 
 

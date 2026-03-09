@@ -341,8 +341,9 @@ class TokenEntropyAnalyzer:
 class PassiveAnalysisOrchestrator:
     """Orchestrate all passive analysis modules"""
 
-    def __init__(self, har_data: Dict):
+    def __init__(self, har_data: Dict, zap_client=None):
         self.har_data = har_data
+        self.zap_client = zap_client  # Not used - passive analysis only
         self.results = {}
 
     def run_all_checks(self) -> Dict:
@@ -396,3 +397,7 @@ class PassiveAnalysisOrchestrator:
             'by_severity': severity_counts,
             'by_category': category_counts
         }
+
+
+# Alias for backward compatibility
+PassiveAnalyzer = PassiveAnalysisOrchestrator

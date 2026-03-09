@@ -186,8 +186,14 @@ class ZAPService:
         except Exception:
             return []
 
-    def start_scan(self, url: str, config: Dict = None) -> Optional[str]:
-        """Start an active scan on URL"""
+    def start_scan(self, url: str, scan_type: str = "active", policy: str = None) -> Optional[Dict]:
+        """Start a scan on URL
+
+        Args:
+            url: Target URL
+            scan_type: spider, active, or full (spider + active)
+            policy: Scan policy name (optional)
+        """
         if not self.is_running:
             return None
 
@@ -199,14 +205,29 @@ class ZAPService:
                 proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
             )
 
+            result = {'url': url, 'scan_type': scan_type}
+
             # Access URL first
             zap.core.access_url(url)
             time.sleep(1)
 
-            # Start active scan
-            scan_id = zap.ascan.scan(url)
-            return scan_id
-        except Exception:
+            # Spider
+            if scan_type in ('spider', 'full'):
+                spider_id = zap.spider.scan(url)
+                result['spider_id'] = spider_id
+
+                # Wait for spider if doing full scan
+                if scan_type == 'full':
+                    while int(zap.spider.status(spider_id)) < 100:
+                        time.sleep(2)
+
+            # Active scan
+            if scan_type in ('active', 'full'):
+                scan_id = zap.ascan.scan(url, scanpolicyname=policy if policy and policy != 'default' else None)
+                result['scan_id'] = scan_id
+
+            return result
+        except Exception as e:
             return None
 
     def get_scan_progress(self, scan_id: str) -> Dict:
@@ -256,8 +277,38 @@ class ZAPService:
         except Exception:
             return False
 
+    def clear_session(self) -> bool:
+        """Clear ZAP session (delete alerts, history)"""
+        if not self.is_running:
+            return False
+
+        try:
+            from zapv2 import ZAPv2
+            conn = self._get_zap_connection()
+            zap = ZAPv2(
+                apikey=conn.get('api_key', ''),
+                proxies={'http': conn['zap_url'], 'https': conn['zap_url']}
+            )
+
+            zap.core.delete_all_alerts()
+            zap.core.new_session()
+            return True
+        except Exception:
+            return False
+
     def get_http_client(self) -> Optional[ZAPHttpClient]:
         """Get ZAP HTTP client for routing requests"""
+        if self.http_client:
+            return self.http_client
+
+        # Create client for external ZAP
+        if self.is_running and not self.http_client:
+            conn = self._get_zap_connection()
+            self.http_client = ZAPHttpClient(
+                zap_url=conn['zap_url'],
+                api_key=conn.get('api_key', '')
+            )
+
         return self.http_client
 
     @staticmethod

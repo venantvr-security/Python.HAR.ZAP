@@ -66,10 +66,13 @@ class HTTPSmugglingTester:
         }
     }
 
-    def __init__(self, har_data: Dict, config: Dict = None):
+    def __init__(self, har_data: Dict, config: Dict = None, zap_client=None):
         self.har_data = har_data
         self.config = config or {}
         self.timeout = self.config.get('smuggling_timeout', 10)
+        # Note: zap_client not used for raw socket smuggling tests
+        # Raw sockets required to bypass HTTP normalization
+        self.zap_client = zap_client
 
     def identify_targets(self) -> List[str]:
         """Identify unique hosts for smuggling tests"""

@@ -182,6 +182,37 @@ function updateScanProgress(scanId, data) {
     }
 }
 
+// localStorage helpers
+function saveFormChoices(formId, fields) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+
+    const data = {};
+    fields.forEach(field => {
+        const el = form.elements[field];
+        if (el) data[field] = el.value;
+    });
+    localStorage.setItem('harzap_' + formId, JSON.stringify(data));
+}
+
+function restoreFormChoices(formId, fields) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+
+    const saved = localStorage.getItem('harzap_' + formId);
+    if (!saved) return;
+
+    try {
+        const data = JSON.parse(saved);
+        fields.forEach(field => {
+            const el = form.elements[field];
+            if (el && data[field] !== undefined) {
+                el.value = data[field];
+            }
+        });
+    } catch (e) {}
+}
+
 // Init
 document.addEventListener('DOMContentLoaded', () => {
     initStatusWebSocket();

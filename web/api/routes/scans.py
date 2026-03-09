@@ -12,26 +12,33 @@ router = APIRouter()
 
 class ScanRequest(BaseModel):
     url: str
+    scan_type: Optional[str] = "active"  # spider, active, full
     policy: Optional[str] = None
     max_duration: Optional[int] = 300
 
 
 @router.post("")
 async def start_scan(request: Request, scan_request: ScanRequest):
-    """Start a new active scan"""
+    """Start a new scan"""
     zap_service = request.app.state.shared['zap_service']
 
     if not zap_service.is_running:
         raise HTTPException(status_code=400, detail="ZAP not running")
 
-    scan_id = zap_service.start_scan(scan_request.url)
+    result = zap_service.start_scan(
+        url=scan_request.url,
+        scan_type=scan_request.scan_type,
+        policy=scan_request.policy
+    )
 
-    if not scan_id:
+    if not result:
         raise HTTPException(status_code=500, detail="Failed to start scan")
 
     return {
-        "scan_id": scan_id,
+        "scan_id": result.get('scan_id'),
+        "spider_id": result.get('spider_id'),
         "url": scan_request.url,
+        "scan_type": scan_request.scan_type,
         "status": "started"
     }
 
@@ -95,3 +102,19 @@ async def stop_scan(request: Request, scan_id: str):
         raise HTTPException(status_code=500, detail="Failed to stop scan")
 
     return {"scan_id": scan_id, "status": "stopped"}
+
+
+@router.post("/clear")
+async def clear_session(request: Request):
+    """Clear ZAP session (alerts, history)"""
+    zap_service = request.app.state.shared['zap_service']
+
+    if not zap_service.is_running:
+        raise HTTPException(status_code=400, detail="ZAP not running")
+
+    success = zap_service.clear_session()
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to clear session")
+
+    return {"status": "cleared"}

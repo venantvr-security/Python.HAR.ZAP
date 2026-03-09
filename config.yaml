@@ -84,6 +84,61 @@ scan_policies:
     enabled: true
     threshold: "High"
 
+# =============================================================================
+# ATTACK STRATEGIES (Advanced Modules)
+# =============================================================================
+attack_strategies:
+  - id: "redteam"
+    name: "Red Team Suite"
+    description: "Mass assignment, hidden params, race conditions, auth bypass"
+    module: "redteam_attacks"
+    enabled: true
+  - id: "jwt"
+    name: "JWT Attacks"
+    description: "None algorithm, weak signatures, key confusion"
+    module: "jwt_attacks"
+    enabled: true
+  - id: "cors"
+    name: "CORS Misconfiguration"
+    description: "Origin reflection, null origin, subdomain wildcards"
+    module: "cors_tester"
+    enabled: true
+  - id: "cache_poison"
+    name: "Cache Poisoning"
+    description: "Web cache deception, header injection"
+    module: "cache_poisoning"
+    enabled: true
+  - id: "http_smuggling"
+    name: "HTTP Smuggling"
+    description: "CL.TE, TE.CL, request splitting"
+    module: "http_smuggling"
+    enabled: true
+  - id: "timing"
+    name: "Timing Analysis"
+    description: "Time-based enumeration, side-channel attacks"
+    module: "timing_analysis"
+    enabled: true
+  - id: "graphql"
+    name: "GraphQL Security"
+    description: "Introspection, batching, deep queries"
+    module: "graphql_scanner"
+    enabled: true
+  - id: "websocket"
+    name: "WebSocket Security"
+    description: "CSWSH, message injection, origin bypass"
+    module: "websocket_scanner"
+    enabled: true
+  - id: "fuzzer"
+    name: "ZAP Fuzzer"
+    description: "Parameter fuzzing with custom payloads"
+    module: "zap_fuzzer"
+    enabled: true
+  - id: "passive"
+    name: "Passive Analysis"
+    description: "Headers, cookies, information disclosure"
+    module: "passive_analysis"
+    enabled: true
+
 alert_thresholds:
   high: 5
   medium: 10

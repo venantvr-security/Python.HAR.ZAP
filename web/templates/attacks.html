@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Advanced Attacks - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>Advanced Attacks</h1>
+<p style="color: var(--text-secondary); margin-bottom: 2rem;">
+    Business logic attacks using HAR data. Routed through ZAP when running.
+</p>
+
+{% if not har_loaded %}
+<div class="alert alert-warning">
+    No HAR loaded. <a href="/har">Upload a HAR file</a> first to run attacks.
+</div>
+{% else %}
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h2>HAR Loaded</h2>
+    </div>
+    <p>{{ har_summary.entries }} requests from {{ har_summary.domains|length }} domain(s)</p>
+</div>
+
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h2>Attack Strategies</h2>
+    </div>
+
+    <div class="grid grid-2">
+        {% for strategy in attack_strategies %}
+        <div class="strategy-card" style="padding: 1rem; border: 1px solid var(--border); border-radius: 0.5rem; {% if not strategy.enabled %}opacity: 0.5;{% endif %}">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0;">{{ strategy.name }}</h3>
+                {% if strategy.enabled %}
+                <button class="btn btn-primary" onclick="runAttack('{{ strategy.id }}', this)">Run</button>
+                {% else %}
+                <span class="badge badge-low">Disabled</span>
+                {% endif %}
+            </div>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                {{ strategy.description }}
+            </p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div id="results-container" style="display: none;">
+    <div class="card">
+        <div class="card-header">
+            <h2>Results</h2>
+            <button class="btn btn-secondary" onclick="clearResults()">Clear</button>
+        </div>
+
+        <div id="results-summary" style="margin-bottom: 1rem;"></div>
+
+        <table class="table" id="results-table" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+        </table>
+
+        <p id="results-more" style="color: var(--text-secondary); display: none;"></p>
+        <p id="results-empty" style="color: var(--success); display: none;">No vulnerabilities found.</p>
+    </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function runAttack(strategyId, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+
+    try {
+        const result = await apiPost('/attacks/run', { strategy: strategyId });
+
+        document.getElementById('results-container').style.display = 'block';
+
+        // Summary
+        const summaryEl = document.getElementById('results-summary');
+        const summaryTitle = document.createElement('h3');
+        summaryTitle.textContent = strategyId.toUpperCase() + ' Results';
+        const summaryPre = document.createElement('pre');
+        summaryPre.textContent = JSON.stringify(result.results.summary, null, 2);
+        summaryEl.replaceChildren(summaryTitle, summaryPre);
+
+        // Findings
+        const findings = result.results.findings || [];
+        const tbody = document.getElementById('results-body');
+        const table = document.getElementById('results-table');
+        const emptyMsg = document.getElementById('results-empty');
+        const moreMsg = document.getElementById('results-more');
+
+        tbody.replaceChildren();
+
+        if (findings.length === 0) {
+            table.style.display = 'none';
+            emptyMsg.style.display = 'block';
+            moreMsg.style.display = 'none';
+        } else {
+            table.style.display = 'table';
+            emptyMsg.style.display = 'none';
+
+            findings.slice(0, 20).forEach(f => {
+                const tr = document.createElement('tr');
+                const tdType = document.createElement('td');
+                tdType.textContent = f.type || f.name || 'Finding';
+                const tdDetails = document.createElement('td');
+                const pre = document.createElement('pre');
+                pre.style.cssText = 'font-size: 0.75rem; max-width: 600px; overflow: auto;';
+                pre.textContent = JSON.stringify(f, null, 2);
+                tdDetails.appendChild(pre);
+                tr.appendChild(tdType);
+                tr.appendChild(tdDetails);
+                tbody.appendChild(tr);
+            });
+
+            if (findings.length > 20) {
+                moreMsg.textContent = 'Showing 20 of ' + findings.length + ' findings.';
+                moreMsg.style.display = 'block';
+            } else {
+                moreMsg.style.display = 'none';
+            }
+        }
+
+        showAlert('success', 'Attack completed: ' + findings.length + ' findings');
+    } catch (err) {
+        showAlert('danger', err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run';
+    }
+}
+
+function clearResults() {
+    document.getElementById('results-container').style.display = 'none';
+    document.getElementById('results-summary').replaceChildren();
+    document.getElementById('results-body').replaceChildren();
+}
+</script>
+{% endblock %}

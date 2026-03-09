@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}HAR Upload - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>HAR Upload</h1>
+
+<div class="grid grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Upload HAR File</h2>
+        </div>
+
+        <form id="har-upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="har-file">Select .har file</label>
+                <input type="file" class="form-control" id="har-file" name="file" accept=".har" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Upload</button>
+        </form>
+
+        {% if har_summary.loaded %}
+        <div class="alert alert-success" style="margin-top: 1rem;">
+            HAR loaded: {{ har_summary.entries }} requests
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>HAR Summary</h2>
+        </div>
+
+        {% if har_summary.loaded %}
+        <div class="grid grid-2" style="margin-bottom: 1rem;">
+            <div class="metric">
+                <div class="metric-value">{{ har_summary.entries }}</div>
+                <div class="metric-label">Requests</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{{ har_summary.unique_urls }}</div>
+                <div class="metric-label">Unique URLs</div>
+            </div>
+        </div>
+
+        <h3>Methods</h3>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            {% for method, count in har_summary.methods.items() %}
+            <span class="badge badge-info">{{ method }}: {{ count }}</span>
+            {% endfor %}
+        </div>
+
+        <h3>Domains</h3>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            {% for domain in har_summary.domains %}
+            <span class="badge badge-low">{{ domain }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: var(--text-secondary);">No HAR loaded yet</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if har_summary.loaded %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>Preprocess</h2>
+    </div>
+
+    <form id="preprocess-form">
+        <div class="grid grid-3">
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="exclude_static" name="exclude_static" checked>
+                    Exclude static files
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="methods">Methods (comma-separated)</label>
+                <input type="text" class="form-control" id="methods" name="methods" placeholder="GET,POST,PUT,DELETE">
+            </div>
+            <div class="form-group">
+                <label for="domains">Domains (comma-separated)</label>
+                <input type="text" class="form-control" id="domains" name="domains" placeholder="example.com">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Preprocess</button>
+    </form>
+
+    <div id="preprocess-result" style="margin-top: 1rem; display: none;">
+        <h3>Preprocessing Results</h3>
+        <div class="grid grid-3">
+            <div class="metric">
+                <div class="metric-value" id="pp-endpoints">-</div>
+                <div class="metric-label">Endpoints</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="pp-querystrings">-</div>
+                <div class="metric-label">Querystrings</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="pp-payloads">-</div>
+                <div class="metric-label">Payloads</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>URLs ({{ har_urls|length }})</h2>
+    </div>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>URL</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for url in har_urls %}
+            <tr>
+                <td style="word-break: break-all;">{{ url[:80] }}{% if url|length > 80 %}...{% endif %}</td>
+                <td>
+                    <button class="btn btn-secondary" onclick="scanUrl('{{ url }}')">Scan</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('har-upload-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const formData = new FormData(form);
+
+    try {
+        const response = await fetch('/api/v1/har/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+            showAlert('success', `HAR loaded: ${result.entries} requests`);
+            location.reload();
+        } else {
+            showAlert('danger', result.detail || 'Upload failed');
+        }
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+});
+
+document.getElementById('preprocess-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+
+    const data = {
+        exclude_static: form.exclude_static.checked
+    };
+
+    if (form.methods.value) {
+        data.methods = form.methods.value.split(',').map(m => m.trim().toUpperCase());
+    }
+    if (form.domains.value) {
+        data.domains = form.domains.value.split(',').map(d => d.trim());
+    }
+
+    try {
+        const result = await apiPost('/har/preprocess', data);
+        document.getElementById('preprocess-result').style.display = 'block';
+        document.getElementById('pp-endpoints').textContent = result.endpoints;
+        document.getElementById('pp-querystrings').textContent = result.querystrings;
+        document.getElementById('pp-payloads').textContent = result.payloads;
+        showAlert('success', 'Preprocessing complete');
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+});
+
+function scanUrl(url) {
+    // Save URL and redirect to scans page
+    localStorage.setItem('harzap_scan-form', JSON.stringify({
+        target_url: url,
+        scan_type: 'active',
+        policy: 'default'
+    }));
+    window.location.href = '/scans';
+}
+</script>
+{% endblock %}
