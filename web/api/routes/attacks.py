@@ -1,7 +1,7 @@
 """
 Advanced Attack Routes
 
-Attacks routed through ZAP when available for unified logging.
+All attacks routed through ZAP Orchestrator for unified execution and alerting.
 """
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -14,7 +14,13 @@ router = APIRouter()
 class AttackRequest(BaseModel):
     strategy: str
     target_url: Optional[str] = None
-    use_zap: Optional[bool] = True  # Route through ZAP by default
+    use_zap: Optional[bool] = True  # Always True - ZAP is the orchestrator
+
+
+class PipelineRequest(BaseModel):
+    strategies: Optional[List[str]] = None  # None = all enabled strategies
+    run_discovery: Optional[bool] = True
+    run_fuzzing: Optional[bool] = False
 
 
 @router.get("/strategies")
@@ -25,9 +31,48 @@ async def list_strategies(request: Request):
     return {"strategies": strategies}
 
 
+@router.post("/pipeline")
+async def run_pipeline(request: Request, pipeline: PipelineRequest):
+    """Run full ZAP orchestrated pipeline: HAR → Context → Discovery → Scans → Alerts"""
+    har_service = request.app.state.shared['har_service']
+    zap_service = request.app.state.shared['zap_service']
+    config = request.app.state.shared['config'] or {}
+
+    if not har_service.current_har:
+        raise HTTPException(status_code=400, detail="No HAR loaded. Upload HAR first.")
+
+    if not zap_service or not zap_service.is_running:
+        raise HTTPException(status_code=400, detail="ZAP not running. Start ZAP first.")
+
+    try:
+        from modules.zap_orchestrator import ZAPOrchestrator
+
+        orchestrator = ZAPOrchestrator(
+            zap_url=zap_service.zap_url,
+            api_key=zap_service.api_key,
+            har_data=har_service.current_har,
+            config=config
+        )
+
+        results = orchestrator.run_pipeline(strategies=pipeline.strategies)
+
+        if pipeline.run_fuzzing:
+            fuzzing_results = orchestrator.run_fuzzing()
+            results['fuzzing'] = fuzzing_results
+
+        return {
+            "status": "completed",
+            "orchestrator": "ZAP",
+            "results": results
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/run")
 async def run_attack(request: Request, attack: AttackRequest):
-    """Run an attack strategy"""
+    """Run a single attack strategy via ZAP Orchestrator"""
     har_service = request.app.state.shared['har_service']
     zap_service = request.app.state.shared['zap_service']
     config = request.app.state.shared['config'] or {}
@@ -44,9 +89,33 @@ async def run_attack(request: Request, attack: AttackRequest):
         raise HTTPException(status_code=400, detail=f"Strategy disabled: {attack.strategy}")
 
     har_data = har_service.current_har
-    module_name = strategy['module']
 
-    # Get ZAP client if ZAP is running and use_zap is True
+    # Always use ZAP Orchestrator when ZAP is running
+    if zap_service and zap_service.is_running:
+        try:
+            from modules.zap_orchestrator import ZAPOrchestrator
+
+            orchestrator = ZAPOrchestrator(
+                zap_url=zap_service.zap_url,
+                api_key=zap_service.api_key,
+                har_data=har_data,
+                config=config
+            )
+
+            results = orchestrator.run_single_strategy(attack.strategy)
+            return {
+                "strategy": attack.strategy,
+                "status": "completed",
+                "routed_via_zap": True,
+                "orchestrator": "ZAP",
+                "results": results
+            }
+        except Exception as e:
+            # Fallback to legacy module execution
+            pass
+
+    # Legacy fallback when ZAP not available
+    module_name = strategy['module']
     zap_client = None
     if attack.use_zap and zap_service and zap_service.is_running:
         zap_client = zap_service.get_http_client()
@@ -57,6 +126,7 @@ async def run_attack(request: Request, attack: AttackRequest):
             "strategy": attack.strategy,
             "status": "completed",
             "routed_via_zap": zap_client is not None,
+            "orchestrator": "legacy",
             "results": results
         }
     except Exception as e:
