@@ -127,6 +127,21 @@ Examples:
                               help='Clear entries older than N days')
     cache_parser.add_argument('-o', '--output', help='Export output file')
 
+    # === DIAGNOSE COMMAND (FULL SUITE) ===
+    diag_parser = subparsers.add_parser('diagnose', help='Run full diagnostic attack suite')
+    diag_parser.add_argument('har_file', help='HAR file to analyze')
+    diag_parser.add_argument('--target', required=True, help='Target URL (e.g., https://www.example.com)')
+    diag_parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    diag_parser.add_argument('--format', default='json,html',
+                             help='Output formats: json,html,sarif,junit')
+    diag_parser.add_argument('--max-high', type=int, help='Max high severity (fail-fast)')
+    diag_parser.add_argument('--fail-fast', action='store_true', help='Exit 1 on criteria fail')
+    diag_parser.add_argument('--skip-zap', action='store_true', help='Skip ZAP active scan')
+    diag_parser.add_argument('--skip-redteam', action='store_true', help='Skip red team attacks')
+    diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
+    diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
+    diag_parser.add_argument('--api-key', help='ZAP API key')
+
     # === ADVANCED ATTACKS COMMAND ===
     adv_parser = subparsers.add_parser('advanced', help='Advanced attack testing')
     adv_parser.add_argument('har_file', help='HAR file to analyze')
@@ -168,6 +183,8 @@ Examples:
         return run_cache(args)
     elif args.command == 'advanced':
         return run_advanced(args)
+    elif args.command == 'diagnose':
+        return run_diagnose(args)
 
     return 0
 
@@ -650,6 +667,234 @@ def run_advanced(args):
         })
 
     return 0
+
+
+def run_diagnose(args):
+    """Run full diagnostic attack suite."""
+    import time
+    start_time = time.time()
+
+    if not Path(args.har_file).exists():
+        print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
+        return 1
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+
+    print(f"[DIAGNOSE] Target: {args.target}")
+    print(f"[DIAGNOSE] HAR: {args.har_file}\n")
+
+    with open(args.har_file) as f:
+        har_data = json.load(f)
+
+    config = load_config()
+    all_findings = []
+    docker_manager = None
+    zap_client = None
+
+    try:
+        # Initialize ZAP
+        print("[1/6] Starting ZAP...")
+        if not args.no_docker:
+            docker_manager = DockerZAPManager(config)
+            zap_config = docker_manager.start_zap()
+            zap_url = zap_config['zap_url']
+            api_key = zap_config.get('api_key', '')
+        else:
+            zap_url = args.zap_url
+            api_key = args.api_key or ''
+
+        from modules.zap_http_client import ZAPHttpClient
+        zap_client = ZAPHttpClient(zap_url=zap_url, api_key=api_key)
+
+        # ZAP Active Scan
+        if not args.skip_zap:
+            print("[2/6] ZAP Active Scan...")
+            analyzer = HARAnalyzer(args.har_file, config)
+            har_analysis = analyzer.analyze()
+            scanner = ZAPScanner({'zap_url': zap_url, 'api_key': api_key}, har_analysis, config)
+            scanner.configure_context()
+            scanner.populate_site_tree()
+            scanner.execute_targeted_scans()
+            zap_alerts = scanner.get_alerts()
+            all_findings.extend([{'source': 'zap', **a} for a in zap_alerts])
+            print(f"  Found: {len(zap_alerts)} alerts")
+        else:
+            print("[2/6] ZAP Active Scan... SKIPPED")
+
+        # Advanced Attacks
+        print("[3/6] Advanced Attacks...")
+        adv_results = {}
+
+        from modules.http_smuggling import HTTPSmugglingTester
+        smuggler = HTTPSmugglingTester(har_data, config)
+        smuggling = smuggler.run_tests()
+        vuln = [r for r in smuggling if r.vulnerable]
+        adv_results['smuggling'] = len(vuln)
+        all_findings.extend([{'source': 'smuggling', 'risk': 'Critical', 'name': 'HTTP Smuggling', 'url': r.url} for r in vuln])
+        print(f"  HTTP Smuggling: {len(vuln)}")
+
+        from modules.jwt_attacks import JWTAttackTester
+        jwt_tester = JWTAttackTester(har_data, config, zap_client=zap_client)
+        jwt_results = jwt_tester.run_tests()
+        vuln = [r for r in jwt_results if r.vulnerable]
+        adv_results['jwt'] = len(vuln)
+        all_findings.extend([{'source': 'jwt', 'risk': 'High', 'name': r.attack_type, 'url': r.url} for r in vuln])
+        print(f"  JWT Attacks: {len(vuln)}")
+
+        from modules.cors_tester import CORSTester
+        cors_tester = CORSTester(har_data, config, zap_client=zap_client)
+        cors_results = cors_tester.run_tests()
+        vuln = [r for r in cors_results if r.vulnerable]
+        adv_results['cors'] = len(vuln)
+        all_findings.extend([{'source': 'cors', 'risk': 'Medium', 'name': 'CORS Misconfiguration', 'url': r.url} for r in vuln])
+        print(f"  CORS: {len(vuln)}")
+
+        from modules.cache_poisoning import CachePoisoningTester
+        cache_tester = CachePoisoningTester(har_data, config, zap_client=zap_client)
+        cache_results = cache_tester.run_tests()
+        vuln = [r for r in cache_results if r.vulnerable]
+        adv_results['cache_poison'] = len(vuln)
+        all_findings.extend([{'source': 'cache', 'risk': 'High', 'name': 'Cache Poisoning', 'url': r.url} for r in vuln])
+        print(f"  Cache Poisoning: {len(vuln)}")
+
+        # Red Team Attacks
+        if not args.skip_redteam:
+            print("[4/6] Red Team Attacks...")
+            from modules.redteam_attacks import RedTeamOrchestrator
+            redteam = RedTeamOrchestrator(har_data, config, zap_client=zap_client)
+            rt_results = redteam.run_all()
+            rt_vulns = rt_results.get('total_vulnerabilities', 0)
+            adv_results['redteam'] = rt_vulns
+            for attack_name, findings in rt_results.get('attacks', {}).items():
+                for f in findings.get('findings', []):
+                    if f.get('vulnerable'):
+                        all_findings.append({'source': 'redteam', 'risk': 'High', 'name': attack_name, 'url': f.get('url', '')})
+            print(f"  Red Team: {rt_vulns}")
+        else:
+            print("[4/6] Red Team Attacks... SKIPPED")
+
+        # Passive Analysis
+        print("[5/6] Passive Analysis...")
+        from modules.passive_analysis import PassiveAnalysisOrchestrator
+        passive = PassiveAnalysisOrchestrator(har_data, config)
+        passive_results = passive.run_all()
+        passive_issues = passive_results.get('total_issues', 0)
+        adv_results['passive'] = passive_issues
+        for issue in passive_results.get('security_headers', {}).get('missing', []):
+            all_findings.append({'source': 'passive', 'risk': 'Low', 'name': f'Missing Header: {issue}', 'url': args.target})
+        print(f"  Passive Issues: {passive_issues}")
+
+        # Summary
+        print("[6/6] Generating Report...")
+        duration = time.time() - start_time
+
+        high_count = len([f for f in all_findings if f.get('risk') in ['High', 'Critical']])
+        medium_count = len([f for f in all_findings if f.get('risk') == 'Medium'])
+        low_count = len([f for f in all_findings if f.get('risk') == 'Low'])
+
+        report = {
+            'target': args.target,
+            'har_file': args.har_file,
+            'duration_seconds': round(duration, 1),
+            'summary': {
+                'total': len(all_findings),
+                'critical_high': high_count,
+                'medium': medium_count,
+                'low': low_count
+            },
+            'breakdown': adv_results,
+            'findings': all_findings
+        }
+
+        # Save JSON
+        json_path = Path(args.output) / 'diagnostic_report.json'
+        with open(json_path, 'w') as f:
+            json.dump(report, f, indent=2)
+
+        # Save HTML if requested
+        if 'html' in args.format:
+            html_path = Path(args.output) / 'diagnostic_report.html'
+            html_content = generate_diagnostic_html(report)
+            with open(html_path, 'w') as f:
+                f.write(html_content)
+
+        print(f"\n{'='*50}")
+        print(f"DIAGNOSTIC COMPLETE - {args.target}")
+        print(f"{'='*50}")
+        print(f"Duration: {duration:.1f}s")
+        print(f"Critical/High: {high_count}")
+        print(f"Medium: {medium_count}")
+        print(f"Low: {low_count}")
+        print(f"Total: {len(all_findings)}")
+        print(f"\nReports: {args.output}/diagnostic_report.*")
+
+        # Fail-fast check
+        if args.fail_fast:
+            max_high = args.max_high if args.max_high is not None else 0
+            if high_count > max_high:
+                print(f"\nFAILED: {high_count} critical/high findings (max: {max_high})")
+                return 1
+            print(f"\nPASSED: Within acceptance criteria")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    finally:
+        if docker_manager:
+            docker_manager.stop_zap()
+
+
+def generate_diagnostic_html(report):
+    """Generate HTML report for diagnostic results."""
+    findings_html = ""
+    for f in report['findings']:
+        risk_class = f.get('risk', 'Info').lower()
+        findings_html += f"""
+        <tr class="{risk_class}">
+            <td>{f.get('risk', 'Info')}</td>
+            <td>{f.get('source', '')}</td>
+            <td>{f.get('name', '')}</td>
+            <td>{f.get('url', '')[:80]}</td>
+        </tr>"""
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Diagnostic Report - {report['target']}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1 {{ color: #333; }}
+        .summary {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background: #333; color: white; }}
+        .critical, .high {{ background: #ffcccc; }}
+        .medium {{ background: #fff3cd; }}
+        .low {{ background: #d4edda; }}
+    </style>
+</head>
+<body>
+    <h1>Diagnostic Security Report</h1>
+    <div class="summary">
+        <strong>Target:</strong> {report['target']}<br>
+        <strong>Duration:</strong> {report['duration_seconds']}s<br>
+        <strong>Critical/High:</strong> {report['summary']['critical_high']}<br>
+        <strong>Medium:</strong> {report['summary']['medium']}<br>
+        <strong>Low:</strong> {report['summary']['low']}<br>
+        <strong>Total:</strong> {report['summary']['total']}
+    </div>
+    <h2>Findings</h2>
+    <table>
+        <tr><th>Risk</th><th>Source</th><th>Name</th><th>URL</th></tr>
+        {findings_html}
+    </table>
+</body>
+</html>"""
 
 
 def build_criteria(args):
