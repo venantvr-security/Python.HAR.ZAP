@@ -384,6 +384,60 @@ red_team_payloads:
     - '__proto__[admin]=true'
     - 'constructor[prototype][admin]=true'
 
+# =============================================================================
+# PATTERN EXTRACTION
+# =============================================================================
+extraction_patterns:
+  numeric_id: '\b\d{1,10}\b'
+  uuid: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+  email: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+  jwt: 'eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*'
+  file_path: '(?:\.\.\/)+|(?:\/[a-zA-Z0-9_-]+)+'
+  mongo_id: '[0-9a-f]{24}'
+
+# =============================================================================
+# PAYLOAD ENRICHMENT MAPPING
+# =============================================================================
+payload_mapping:
+  numeric_id:
+    zap_categories:
+      - "jbrofuzz/Integer Overflow"
+    custom:
+      - "0"
+      - "-1"
+      - "999999"
+      - "2147483647"
+      - "{{id+1}}"
+      - "{{id-1}}"
+  uuid:
+    zap_categories: []
+    custom:
+      - "00000000-0000-0000-0000-000000000000"
+      - "{{uuid_other}}"
+  file_path:
+    zap_categories:
+      - "fuzzdb/attack/path-traversal"
+    custom:
+      - "../../../etc/passwd"
+      - "....//....//etc/passwd"
+  email:
+    zap_categories: []
+    custom:
+      - "admin@target.com"
+      - "{{email}}@evil.com"
+      - "test'--@x.com"
+  jwt:
+    zap_categories: []
+    custom:
+      - "none_algo"
+      - "weak_key"
+      - "expired"
+  mongo_id:
+    zap_categories: []
+    custom:
+      - "000000000000000000000000"
+      - "{{mongo_id_other}}"
+
 # Race Condition
 race_condition_requests: 100
 

@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 import markdown
 
-from .routes import zap, scans, config, docs, tor, har, attacks
+from .routes import zap, scans, config, docs, tor, har, attacks, enrich
 from .websockets import scan_monitor
 
 # Paths
@@ -83,6 +83,7 @@ app.include_router(docs.router, prefix="/api/v1/docs", tags=["Docs"])
 app.include_router(tor.router, prefix="/api/v1/proxy", tags=["TOR"])
 app.include_router(har.router, prefix="/api/v1/har", tags=["HAR"])
 app.include_router(attacks.router, prefix="/api/v1/attacks", tags=["Attacks"])
+app.include_router(enrich.router, prefix="/api/v1/enrich", tags=["Enrich"])
 app.include_router(scan_monitor.router, prefix="/api/v1/ws", tags=["WebSocket"])
 
 app.state.shared = state
@@ -277,6 +278,26 @@ async def attacks_page(request: Request):
         "har_loaded": har_summary.get('loaded', False),
         "har_summary": har_summary,
         "attack_strategies": attack_strategies
+    })
+
+
+@app.get("/enrich")
+async def enrich_page(request: Request):
+    """Payload enrichment page"""
+    har_svc = state['har_service']
+    zap_svc = state['zap_service']
+    cfg = state['config'] or {}
+
+    har_summary = har_svc.get_summary() if har_svc else {'loaded': False}
+    zap_status = zap_svc.get_status() if zap_svc else {'running': False}
+    patterns = cfg.get('extraction_patterns', {})
+
+    return templates.TemplateResponse("enrich.html", {
+        "request": request,
+        "active": "enrich",
+        "har_loaded": har_summary.get('loaded', False),
+        "zap_running": zap_status.get('running', False),
+        "patterns": list(patterns.keys())
     })
 
 

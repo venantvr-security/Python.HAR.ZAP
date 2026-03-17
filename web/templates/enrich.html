@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Payload Enrichment - HAR-ZAP{% endblock %}
+
+{% block content %}
+<div id="alerts"></div>
+
+<h1>Payload Enrichment</h1>
+<p style="color: var(--text-secondary); margin-bottom: 2rem;">
+    Extract patterns from HAR and enrich with ZAP fuzzer payloads.
+</p>
+
+{% if not har_loaded %}
+<div class="alert alert-warning">
+    No HAR loaded. <a href="/har">Upload a HAR file</a> first.
+</div>
+{% else %}
+
+<div class="grid grid-2" style="gap: 1.5rem;">
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Pattern Extraction</h2>
+        </div>
+
+        <div class="form-group">
+            <label for="pattern-type">Pattern Type</label>
+            <select id="pattern-type" class="form-control">
+                {% for pattern in patterns %}
+                <option value="{{ pattern }}">{{ pattern|replace('_', ' ')|title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button class="btn btn-primary" onclick="extractPatterns()">Extract from HAR</button>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Payload Preview</h2>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="include-custom" checked> Include Custom Payloads
+            </label>
+        </div>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="include-zap" checked> Include ZAP Payloads
+            </label>
+        </div>
+
+        <button class="btn btn-secondary" onclick="previewPayloads()">Preview Payloads</button>
+    </div>
+
+</div>
+
+<div id="extraction-results" class="card" style="margin-top: 1.5rem; display: none;">
+    <div class="card-header">
+        <h2>Extraction Results</h2>
+        <span id="extraction-count" class="badge badge-info"></span>
+    </div>
+
+    <div id="extraction-summary"></div>
+
+    <h3 style="margin-top: 1rem;">Injection Points</h3>
+    <table class="table" id="injection-table">
+        <thead>
+            <tr>
+                <th>Location</th>
+                <th>Parameter</th>
+                <th>Value</th>
+                <th>URL</th>
+            </tr>
+        </thead>
+        <tbody id="injection-body"></tbody>
+    </table>
+</div>
+
+<div id="preview-results" class="card" style="margin-top: 1.5rem; display: none;">
+    <div class="card-header">
+        <h2>Payload Preview</h2>
+        <span id="payload-count" class="badge badge-info"></span>
+    </div>
+
+    <div id="payload-sources" style="margin-bottom: 1rem;"></div>
+
+    <pre id="payload-list" style="max-height: 300px; overflow: auto; background: var(--bg-secondary); padding: 1rem; border-radius: 0.5rem;"></pre>
+</div>
+
+{% if zap_running %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>Fuzzing</h2>
+    </div>
+
+    <div class="form-group">
+        <label for="fuzz-url">Target URL</label>
+        <input type="text" id="fuzz-url" class="form-control" placeholder="http://target/api/user/123">
+    </div>
+
+    <div class="form-group">
+        <label for="fuzz-param">Parameter</label>
+        <input type="text" id="fuzz-param" class="form-control" placeholder="id">
+    </div>
+
+    <button class="btn btn-primary" onclick="launchFuzz()">Launch Fuzzing</button>
+</div>
+{% else %}
+<div class="alert alert-warning" style="margin-top: 1.5rem;">
+    ZAP not running. <a href="/">Start ZAP</a> to enable fuzzing.
+</div>
+{% endif %}
+
+<div id="fuzz-results" class="card" style="margin-top: 1.5rem; display: none;">
+    <div class="card-header">
+        <h2>Fuzzing Results</h2>
+    </div>
+    <pre id="fuzz-output" style="background: var(--bg-secondary); padding: 1rem; border-radius: 0.5rem;"></pre>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function extractPatterns() {
+    const patternType = document.getElementById('pattern-type').value;
+
+    try {
+        const result = await apiPost('/enrich/extract', { pattern_types: [patternType] });
+        const extraction = result.extraction;
+        const patternData = extraction.patterns[patternType] || {};
+
+        document.getElementById('extraction-results').style.display = 'block';
+        document.getElementById('extraction-count').textContent =
+            patternData.values_count + ' values, ' + patternData.injection_points_count + ' injection points';
+
+        const summaryEl = document.getElementById('extraction-summary');
+        if (patternData.values && patternData.values.length > 0) {
+            summaryEl.innerHTML = '<strong>Values found:</strong> ' + patternData.values.slice(0, 10).join(', ') +
+                (patternData.values.length > 10 ? '...' : '');
+        } else {
+            summaryEl.innerHTML = '<em>No values found for this pattern.</em>';
+        }
+
+        const tbody = document.getElementById('injection-body');
+        tbody.replaceChildren();
+
+        (patternData.injection_points || []).forEach(p => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + p.location + '</td>' +
+                '<td><code>' + p.param + '</code></td>' +
+                '<td><code>' + p.value + '</code></td>' +
+                '<td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">' + p.url + '</td>';
+            tbody.appendChild(tr);
+        });
+
+        showAlert('success', 'Extraction completed');
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+}
+
+async function previewPayloads() {
+    const patternType = document.getElementById('pattern-type').value;
+    const includeCustom = document.getElementById('include-custom').checked;
+    const includeZap = document.getElementById('include-zap').checked;
+
+    try {
+        const result = await apiPost('/enrich/preview', {
+            pattern_type: patternType,
+            include_custom: includeCustom,
+            include_zap: includeZap,
+            limit: 100
+        });
+
+        const preview = result.preview;
+
+        document.getElementById('preview-results').style.display = 'block';
+        document.getElementById('payload-count').textContent =
+            preview.total_count + ' payloads' + (preview.truncated ? ' (truncated)' : '');
+
+        const sourcesEl = document.getElementById('payload-sources');
+        sourcesEl.innerHTML = '<strong>Sources:</strong> ' +
+            preview.custom_count + ' custom, ' +
+            preview.zap_count + ' ZAP' +
+            (preview.sources.length > 0 ? ' (' + preview.sources.join(', ') + ')' : '');
+
+        document.getElementById('payload-list').textContent = preview.payloads.join('\n');
+
+        showAlert('success', 'Preview loaded');
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+}
+
+async function launchFuzz() {
+    const patternType = document.getElementById('pattern-type').value;
+    const url = document.getElementById('fuzz-url').value;
+    const param = document.getElementById('fuzz-param').value;
+
+    if (!url || !param) {
+        showAlert('warning', 'Please enter target URL and parameter');
+        return;
+    }
+
+    try {
+        showAlert('info', 'Fuzzing started...');
+
+        const result = await apiPost('/enrich/fuzz', {
+            url: url,
+            param: param,
+            pattern_type: patternType
+        });
+
+        document.getElementById('fuzz-results').style.display = 'block';
+        document.getElementById('fuzz-output').textContent = JSON.stringify(result.fuzz_result, null, 2);
+
+        showAlert('success', 'Fuzzing completed: ' + result.fuzz_result.total_payloads + ' payloads sent');
+    } catch (err) {
+        showAlert('danger', err.message);
+    }
+}
+</script>
+{% endblock %}
