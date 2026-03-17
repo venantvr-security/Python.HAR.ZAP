@@ -2,6 +2,15 @@
 
 Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP orchestration, Red Team offensive testing, IDOR detection, and CI/CD integration.
 
+## Branches
+
+| Branch | Description |
+|--------|-------------|
+| `master` | Stable release. Core DAST features, Red Team attacks, IDOR detection. |
+| `llm` | LLM integration (experimental). Domain-aware attack enrichment via Claude API. Single LLM call per HAR, session-scoped pattern persistence, ZAP fuzzer export. |
+
+> **Note**: Both branches are under active testing. Expect breaking changes.
+
 ## Features
 
 ### Core Capabilities
