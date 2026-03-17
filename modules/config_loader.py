@@ -43,6 +43,18 @@ TOR_ENV_MAPPING = {
     'HARZAP_TOR_NEW_CIRCUIT_PER_SCAN': ('tor', 'new_circuit_per_scan', lambda x: x.lower() in ('true', '1', 'yes')),
 }
 
+# LLM environment variable mappings (nested config)
+LLM_ENV_MAPPING = {
+    'HARZAP_LLM_API_KEY': ('llm', 'api_key', str),
+    'HARZAP_LLM_ENABLED': ('llm', 'enabled', lambda x: x.lower() in ('true', '1', 'yes')),
+    'HARZAP_LLM_MODEL': ('llm', 'model', str),
+    'HARZAP_LLM_PROVIDER': ('llm', 'provider', str),
+    'HARZAP_LLM_MAX_TOKENS': ('llm', 'max_tokens', int),
+    'HARZAP_LLM_TEMPERATURE': ('llm', 'temperature', float),
+    'HARZAP_LLM_TIMEOUT': ('llm', 'timeout', int),
+    'HARZAP_LLM_CACHE_TTL': ('llm', 'cache', 'ttl_hours', int),
+}
+
 DEFAULT_CONFIG = {
     'zap_port': 8080,
     'zap_image': 'ghcr.io/zaproxy/zaproxy:stable',
@@ -112,6 +124,27 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
                     config[section] = {}
                 config[section][key] = converter(os.environ[env_var])
                 logger.debug("env_override", key=f"{section}.{key}", source=env_var)
+            except ValueError as e:
+                logger.warning("env_parse_error", var=env_var, error=str(e))
+
+    # Apply LLM environment overrides (nested, supports 2-3 level nesting)
+    for env_var, mapping in LLM_ENV_MAPPING.items():
+        if env_var in os.environ:
+            try:
+                if len(mapping) == 3:
+                    section, key, converter = mapping
+                    if section not in config:
+                        config[section] = {}
+                    config[section][key] = converter(os.environ[env_var])
+                    logger.debug("env_override", key=f"{section}.{key}", source=env_var)
+                elif len(mapping) == 4:
+                    section, subsection, key, converter = mapping
+                    if section not in config:
+                        config[section] = {}
+                    if subsection not in config[section]:
+                        config[section][subsection] = {}
+                    config[section][subsection][key] = converter(os.environ[env_var])
+                    logger.debug("env_override", key=f"{section}.{subsection}.{key}", source=env_var)
             except ValueError as e:
                 logger.warning("env_parse_error", var=env_var, error=str(e))
 

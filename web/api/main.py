@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 import markdown
 
-from .routes import zap, scans, config, docs, tor, har, attacks, enrich
+from .routes import zap, scans, config, docs, tor, har, attacks, enrich, llm
 from .websockets import scan_monitor
 
 # Paths
@@ -84,6 +84,7 @@ app.include_router(tor.router, prefix="/api/v1/proxy", tags=["TOR"])
 app.include_router(har.router, prefix="/api/v1/har", tags=["HAR"])
 app.include_router(attacks.router, prefix="/api/v1/attacks", tags=["Attacks"])
 app.include_router(enrich.router, prefix="/api/v1/enrich", tags=["Enrich"])
+app.include_router(llm.router, prefix="/api/v1/llm", tags=["LLM"])
 app.include_router(scan_monitor.router, prefix="/api/v1/ws", tags=["WebSocket"])
 
 app.state.shared = state

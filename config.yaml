@@ -509,3 +509,27 @@ web:
   api_port: 8000
   streamlit_port: 8501
   enable_websockets: true
+
+# =============================================================================
+# LLM INTEGRATION
+# =============================================================================
+llm:
+  enabled: true
+  provider: "anthropic"
+  model: "claude-sonnet-4-20250514"
+  # API key via env: HARZAP_LLM_API_KEY
+
+  # Request settings
+  max_tokens: 4000
+  temperature: 0.1    # Low for deterministic analysis
+  timeout: 60
+  max_retries: 3
+
+  # Cost control
+  requests_per_minute: 10.0
+
+  # Caching
+  cache:
+    enabled: true
+    directory: "./.llm_cache"
+    ttl_hours: 24
