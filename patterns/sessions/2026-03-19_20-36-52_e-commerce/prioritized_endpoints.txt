@@ -1,0 +1,1 @@
+{"endpoint": "/api/checkout", "risk_score": 0.9}

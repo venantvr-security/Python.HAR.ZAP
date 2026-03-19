@@ -1,0 +1,10 @@
+[
+  {
+    "type": "state_skip",
+    "flow": [
+      "/cart",
+      "/checkout"
+    ],
+    "attack": "skip payment"
+  }
+]

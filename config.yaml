@@ -515,9 +515,10 @@ web:
 # =============================================================================
 llm:
   enabled: true
-  provider: "anthropic"
+  provider: "anthropic"  # "anthropic" | "gemini"
   model: "claude-sonnet-4-20250514"
-  # API key via env: HARZAP_LLM_API_KEY
+  # Anthropic: HARZAP_LLM_API_KEY
+  # Gemini models: gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash
 
   # Request settings
   max_tokens: 4000
@@ -527,6 +528,12 @@ llm:
 
   # Cost control
   requests_per_minute: 10.0
+
+  # Gemini batch mode (async, 50% cheaper, inline requests)
+  # gemini_api_key: ""  # HARZAP_GEMINI_API_KEY
+  batch_enabled: false       # HARZAP_LLM_BATCH_ENABLED
+  batch_poll_interval: 5.0   # seconds between status polls
+  batch_max_wait: 3600       # max wait for batch completion
 
   # Caching
   cache:

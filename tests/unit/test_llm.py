@@ -232,6 +232,255 @@ class TestLLMClient:
         assert response.model == "claude-test"
 
 
+class TestGeminiProvider:
+    """Test Gemini provider"""
+
+    def test_gemini_config(self):
+        from modules.llm.client import LLMConfig
+
+        config = LLMConfig(
+            provider="gemini",
+            gemini_api_key="test-gemini-key",
+            batch_enabled=True,
+            batch_poll_interval=2.0,
+            batch_max_wait=600
+        )
+        assert config.provider == "gemini"
+        assert config.gemini_api_key == "test-gemini-key"
+        assert config.batch_enabled is True
+        assert config.batch_poll_interval == 2.0
+
+    def test_gemini_init_without_api_key(self):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        config = LLMConfig(provider="gemini", gemini_api_key="")
+        with pytest.raises(ValueError, match="Gemini API key required"):
+            LLMClient(config)
+
+    def test_gemini_init_with_api_key(self):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        config = LLMConfig(provider="gemini", gemini_api_key="test-key")
+        client = LLMClient(config)
+        assert client.config.gemini_api_key == "test-key"
+
+    def test_unknown_provider(self):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        config = LLMConfig(provider="unknown", api_key="test")
+        with pytest.raises(ValueError, match="Unknown provider"):
+            LLMClient(config)
+
+    @patch.dict('os.environ', {'HARZAP_GEMINI_API_KEY': 'env-gemini-key'})
+    def test_from_config_gemini(self):
+        from modules.llm.client import LLMClient
+
+        config = {'llm': {'provider': 'gemini', 'model': 'gemini-1.5-flash'}}
+        client = LLMClient.from_config(config)
+        assert client.config.provider == 'gemini'
+        assert client.config.gemini_api_key == 'env-gemini-key'
+        assert client.config.model == 'gemini-1.5-flash'
+
+    @patch.dict('os.environ', {'HARZAP_GEMINI_API_KEY': 'key', 'HARZAP_LLM_BATCH_ENABLED': 'true'})
+    def test_from_config_batch_enabled(self):
+        from modules.llm.client import LLMClient
+
+        config = {'llm': {'provider': 'gemini'}}
+        client = LLMClient.from_config(config)
+        assert client.config.batch_enabled is True
+
+    @patch('modules.llm.client.create_http_session')
+    def test_complete_gemini_sync(self, mock_session):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "Gemini response"}]
+                }
+            }],
+            "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = mock_response
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="test-key", model="gemini-1.5-pro")
+        client = LLMClient(config)
+        response = client.complete("test prompt")
+
+        assert response.content == "Gemini response"
+        assert response.model == "gemini-1.5-pro"
+
+    @patch('modules.llm.client.create_http_session')
+    def test_complete_gemini_with_system(self, mock_session):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "response"}]}}],
+            "usageMetadata": {}
+        }
+        mock_response.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = mock_response
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="test-key")
+        client = LLMClient(config)
+        client.complete("prompt", system="You are a helpful assistant")
+
+        # Verify system prompt was included
+        call_args = mock_sess.post.call_args
+        payload = call_args[1]['json']
+        assert len(payload['contents']) == 3  # system + model ack + user
+
+    @patch('modules.llm.client.create_http_session')
+    def test_complete_gemini_empty_response(self, mock_session):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"candidates": []}
+        mock_response.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = mock_response
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="test-key")
+        client = LLMClient(config)
+        response = client.complete("test")
+
+        assert response.content == ""
+
+    @patch('modules.llm.client.time.sleep')
+    @patch('modules.llm.client.create_http_session')
+    def test_complete_gemini_batch(self, mock_session, mock_sleep):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        # Create job response
+        create_response = Mock()
+        create_response.json.return_value = {"name": "operations/batch-123"}
+        create_response.raise_for_status = Mock()
+
+        # Poll response - succeeded
+        poll_response = Mock()
+        poll_response.json.return_value = {
+            "state": "JOB_STATE_SUCCEEDED",
+            "dest": {
+                "inlinedResponses": [{
+                    "response": {
+                        "candidates": [{"content": {"parts": [{"text": "batch result"}]}}]
+                    }
+                }]
+            }
+        }
+        poll_response.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = create_response
+        mock_sess.get.return_value = poll_response
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="test-key", batch_enabled=True)
+        client = LLMClient(config)
+        response = client.complete("test prompt")
+
+        assert response.content == "batch result"
+        mock_sess.post.assert_called_once()
+        mock_sess.get.assert_called_once()
+
+    @patch('modules.llm.client.time.sleep')
+    @patch('modules.llm.client.create_http_session')
+    def test_gemini_batch_polling(self, mock_session, mock_sleep):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        create_response = Mock()
+        create_response.json.return_value = {"name": "operations/test"}
+        create_response.raise_for_status = Mock()
+
+        # First poll: pending, second poll: succeeded
+        poll_pending = Mock()
+        poll_pending.json.return_value = {"state": "JOB_STATE_RUNNING"}
+        poll_pending.raise_for_status = Mock()
+
+        poll_done = Mock()
+        poll_done.json.return_value = {
+            "state": "JOB_STATE_SUCCEEDED",
+            "dest": {"inlinedResponses": [{"response": {"candidates": [{"content": {"parts": [{"text": "done"}]}}]}}]}
+        }
+        poll_done.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = create_response
+        mock_sess.get.side_effect = [poll_pending, poll_done]
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="key", batch_enabled=True, batch_poll_interval=0.1)
+        client = LLMClient(config)
+        response = client.complete("test")
+
+        assert response.content == "done"
+        assert mock_sess.get.call_count == 2
+        mock_sleep.assert_called()
+
+    @patch('modules.llm.client.time.sleep')
+    @patch('modules.llm.client.create_http_session')
+    def test_gemini_batch_failed(self, mock_session, mock_sleep):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        create_response = Mock()
+        create_response.json.return_value = {"name": "operations/fail"}
+        create_response.raise_for_status = Mock()
+
+        poll_response = Mock()
+        poll_response.json.return_value = {"state": "JOB_STATE_FAILED"}
+        poll_response.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = create_response
+        mock_sess.get.return_value = poll_response
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="key", batch_enabled=True)
+        client = LLMClient(config)
+
+        with pytest.raises(RuntimeError, match="batch failed"):
+            client.complete("test")
+
+    @patch('modules.llm.client.time.monotonic')
+    @patch('modules.llm.client.time.sleep')
+    @patch('modules.llm.client.create_http_session')
+    def test_gemini_batch_timeout(self, mock_session, mock_sleep, mock_time):
+        from modules.llm.client import LLMClient, LLMConfig
+
+        # Simulate timeout
+        mock_time.side_effect = [0, 0, 0, 100, 200, 300]  # Exceed batch_max_wait
+
+        create_response = Mock()
+        create_response.json.return_value = {"name": "operations/timeout"}
+        create_response.raise_for_status = Mock()
+
+        poll_response = Mock()
+        poll_response.json.return_value = {"state": "JOB_STATE_RUNNING"}
+        poll_response.raise_for_status = Mock()
+
+        mock_sess = Mock()
+        mock_sess.post.return_value = create_response
+        mock_sess.get.return_value = poll_response
+        mock_session.return_value = mock_sess
+
+        config = LLMConfig(provider="gemini", gemini_api_key="key", batch_enabled=True, batch_max_wait=1)
+        client = LLMClient(config)
+
+        with pytest.raises(TimeoutError, match="timeout"):
+            client.complete("test")
+
+
 class TestLLMCache:
     """Test LLM cache"""
 
@@ -412,6 +661,135 @@ class TestLLMSecurityAnalyzer:
         content = 'No JSON here'
         result = analyzer._extract_json(content)
         assert result is None
+
+    def test_extract_json_code_block(self):
+        """Test extraction from generic code block."""
+        from modules.llm.analyzer import LLMSecurityAnalyzer
+
+        analyzer = LLMSecurityAnalyzer.__new__(LLMSecurityAnalyzer)
+        result = analyzer._extract_json('```\n{"code": "block"}\n```')
+        assert result == {"code": "block"}
+
+    def test_parse_response_success(self, sample_har):
+        """Test successful response parsing."""
+        from modules.llm.analyzer import LLMSecurityAnalyzer, SecurityPlan
+        from modules.llm.client import LLMResponse
+        from modules.llm.context_extractor import HARContextExtractor
+
+        analyzer = LLMSecurityAnalyzer.__new__(LLMSecurityAnalyzer)
+        context = HARContextExtractor(sample_har).extract()
+
+        response = LLMResponse(
+            content=json.dumps({
+                "domain_analysis": {"type": "ecommerce"},
+                "strategies": [{"attack_type": "idor", "priority": "high"}],
+                "prioritized_endpoints": ["/users/{id}"],
+                "custom_regex_patterns": [],
+                "business_logic_flows": []
+            }),
+            model="test-model",
+            usage={"input": 100},
+            latency_ms=500
+        )
+
+        plan = analyzer._parse_response(response, context)
+        assert isinstance(plan, SecurityPlan)
+        assert plan.domain_analysis["type"] == "ecommerce"
+        assert len(plan.strategies) == 1
+        assert plan.strategies[0].attack_type == "idor"
+
+    def test_parse_response_invalid_json(self, sample_har):
+        """Test parsing with invalid JSON returns minimal plan."""
+        from modules.llm.analyzer import LLMSecurityAnalyzer
+        from modules.llm.client import LLMResponse
+        from modules.llm.context_extractor import HARContextExtractor
+
+        analyzer = LLMSecurityAnalyzer.__new__(LLMSecurityAnalyzer)
+        context = HARContextExtractor(sample_har).extract()
+
+        response = LLMResponse(
+            content="not valid json",
+            model="test",
+            usage={},
+            latency_ms=100
+        )
+
+        plan = analyzer._parse_response(response, context)
+        assert plan.strategies == []
+        assert 'error' in plan.metadata
+
+    @patch('modules.llm.analyzer.LLMClient')
+    def test_analyze_cache_hit(self, mock_client_class, sample_har, tmp_path):
+        """Test analyze returns cached result."""
+        from modules.llm.analyzer import LLMSecurityAnalyzer, SecurityPlan, AttackStrategy
+        from modules.llm.cache import LLMCache
+
+        cache = LLMCache(cache_dir=str(tmp_path))
+        mock_client = Mock()
+        analyzer = LLMSecurityAnalyzer(mock_client, cache)
+
+        # Pre-populate cache
+        from modules.llm.context_extractor import HARContextExtractor
+        context = HARContextExtractor(sample_har).extract()
+        cached_plan = SecurityPlan(
+            har_hash=context.har_hash,
+            domain_analysis={"cached": True},
+            strategies=[AttackStrategy(attack_type="test", priority="high")],
+            prioritized_endpoints=[],
+            custom_regex_patterns=[],
+            business_logic_flows=[],
+            metadata={}
+        )
+        cache.set(context.har_hash, cached_plan)
+
+        result = analyzer.analyze(sample_har)
+        assert result.domain_analysis["cached"] is True
+        mock_client.complete.assert_not_called()
+
+    @patch('modules.llm.analyzer.LLMClient')
+    def test_analyze_cache_miss(self, mock_client_class, sample_har, tmp_path):
+        """Test analyze calls LLM on cache miss."""
+        from modules.llm.analyzer import LLMSecurityAnalyzer
+        from modules.llm.cache import LLMCache
+        from modules.llm.client import LLMResponse
+
+        cache = LLMCache(cache_dir=str(tmp_path))
+        mock_client = Mock()
+        mock_client.complete.return_value = LLMResponse(
+            content=json.dumps({
+                "domain_analysis": {"type": "api"},
+                "strategies": [],
+                "prioritized_endpoints": [],
+                "custom_regex_patterns": [],
+                "business_logic_flows": []
+            }),
+            model="test",
+            usage={},
+            latency_ms=100
+        )
+        analyzer = LLMSecurityAnalyzer(mock_client, cache)
+
+        result = analyzer.analyze(sample_har)
+        mock_client.complete.assert_called_once()
+        assert result.domain_analysis["type"] == "api"
+
+    @patch.dict('os.environ', {'HARZAP_LLM_API_KEY': 'test-key'})
+    def test_from_config(self, tmp_path):
+        """Test factory method."""
+        from modules.llm.analyzer import LLMSecurityAnalyzer
+
+        config = {
+            'llm': {
+                'provider': 'anthropic',
+                'cache': {
+                    'directory': str(tmp_path),
+                    'ttl_hours': 12
+                }
+            }
+        }
+        analyzer = LLMSecurityAnalyzer.from_config(config)
+        assert analyzer.client is not None
+        assert analyzer.cache.ttl_seconds == 12 * 3600
 
 
 class TestPromptTemplates:
@@ -606,7 +984,7 @@ class TestLLMZAPIntegration:
     def test_domain_enrichment(self, sample_plan):
         from modules.llm.zap_integration import LLMZAPEnricher
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
 
         assert enricher.domain == "e-commerce"
         assert enricher.confidence == 0.85
@@ -614,7 +992,7 @@ class TestLLMZAPIntegration:
     def test_get_domain_enrichment(self, sample_plan):
         from modules.llm.zap_integration import LLMZAPEnricher
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
         enrichment = enricher.get_domain_enrichment()
 
         assert enrichment.domain == "e-commerce"
@@ -624,7 +1002,7 @@ class TestLLMZAPIntegration:
     def test_enrich_zap_payloads(self, sample_plan):
         from modules.llm.zap_integration import LLMZAPEnricher
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
         payloads = enricher.enrich_zap_payloads(None)
 
         assert 'mass_assignment' in payloads
@@ -634,7 +1012,7 @@ class TestLLMZAPIntegration:
     def test_get_passive_scanner_patterns(self, sample_plan):
         from modules.llm.zap_integration import LLMZAPEnricher
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
         patterns = enricher.get_passive_scanner_patterns()
 
         assert len(patterns) == 1
@@ -643,7 +1021,7 @@ class TestLLMZAPIntegration:
     def test_get_business_logic_tests(self, sample_plan):
         from modules.llm.zap_integration import LLMZAPEnricher
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
         tests = enricher.get_business_logic_tests()
 
         assert len(tests) == 1
@@ -652,7 +1030,7 @@ class TestLLMZAPIntegration:
     def test_export_wordlists(self, sample_plan, tmp_path):
         from modules.llm.zap_integration import LLMZAPEnricher
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
         exported = enricher.export_wordlists(str(tmp_path))
 
         assert 'mass_assignment' in exported
@@ -668,7 +1046,7 @@ class TestLLMZAPIntegration:
 
         dict_manager = DictionaryManager(base_dict_path=str(tmp_path))
 
-        enricher = LLMZAPEnricher(sample_plan, {})
+        enricher = LLMZAPEnricher(sample_plan, {}, auto_persist=False)
         counts = enricher.enrich_dictionary_manager(dict_manager)
 
         assert counts.get('mass_assignment', 0) == 2

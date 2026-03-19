@@ -1,0 +1,2 @@
+discount_rate=100
+is_vip=True

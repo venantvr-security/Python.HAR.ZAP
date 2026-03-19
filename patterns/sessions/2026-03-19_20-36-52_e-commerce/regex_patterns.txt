@@ -1,0 +1,1 @@
+{"name": "promo_code", "regex": "PROMO[A-Z0-9]+", "severity": "medium"}

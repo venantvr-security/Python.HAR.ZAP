@@ -1,0 +1,12 @@
+[
+  {
+    "field": "discount_rate",
+    "value": 100,
+    "reason": "price manipulation"
+  },
+  {
+    "field": "is_vip",
+    "value": true,
+    "reason": "privilege escalation"
+  }
+]

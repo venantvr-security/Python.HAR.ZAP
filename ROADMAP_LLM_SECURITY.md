@@ -21,7 +21,7 @@ One LLM call per HAR, cached by hash. Strategies consume the SecurityPlan.
 
 | Module | Purpose |
 |--------|---------|
-| `modules/llm/client.py` | Anthropic API wrapper, rate limiting |
+| `modules/llm/client.py` | Multi-provider (Anthropic, Gemini), rate limiting |
 | `modules/llm/cache.py` | File cache by HAR hash, TTL 24h |
 | `modules/llm/context_extractor.py` | Privacy-safe HAR extraction (keys only) |
 | `modules/llm/analyzer.py` | SecurityPlan generator |
@@ -65,17 +65,25 @@ POST /llm/patterns/{id}/push   # Push to ZAP export
 ```yaml
 llm:
   enabled: true
-  provider: "anthropic"
+  provider: "anthropic"  # "anthropic" | "gemini"
   model: "claude-sonnet-4-20250514"
+  # Gemini: gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash
   max_tokens: 4000
   temperature: 0.1
+  batch_enabled: false   # Gemini batch mode (async, 50% cheaper)
+  batch_poll_interval: 5.0
+  batch_max_wait: 3600
   cache:
     enabled: true
     directory: "./.llm_cache"
     ttl_hours: 24
 ```
 
-Env: `HARZAP_LLM_API_KEY`
+Env vars:
+- `HARZAP_LLM_API_KEY` - Anthropic
+- `HARZAP_GEMINI_API_KEY` - Gemini
+- `HARZAP_LLM_PROVIDER` - provider selection
+- `HARZAP_LLM_BATCH_ENABLED` - batch mode
 
 ## Privacy
 
@@ -97,4 +105,6 @@ Docker mount:
 
 - [ ] CLI command for offline enrichment
 - [ ] Rate limiter metrics
-- [ ] Multi-provider support (OpenAI, local models)
+- [x] Multi-provider support (Gemini with batch mode)
+- [ ] OpenAI provider
+- [ ] Local models (Ollama)

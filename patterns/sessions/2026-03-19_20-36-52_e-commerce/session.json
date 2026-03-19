@@ -1,0 +1,54 @@
+{
+  "session_id": "2026-03-19_20-36-52_e-commerce",
+  "created_at": "2026-03-19T20:36:52.640567",
+  "domain": "e-commerce",
+  "confidence": 0.85,
+  "har_hash": "test_integration",
+  "patterns": {
+    "mass_assignment": [
+      {
+        "field": "discount_rate",
+        "value": 100,
+        "reason": "price manipulation"
+      },
+      {
+        "field": "is_vip",
+        "value": true,
+        "reason": "privilege escalation"
+      }
+    ],
+    "hidden_params": [],
+    "idor": [],
+    "regex_patterns": [
+      {
+        "name": "promo_code",
+        "regex": "PROMO[A-Z0-9]+",
+        "severity": "medium"
+      }
+    ],
+    "race_conditions": [],
+    "business_logic": [
+      {
+        "type": "state_skip",
+        "flow": [
+          "/cart",
+          "/checkout"
+        ],
+        "attack": "skip payment"
+      }
+    ],
+    "prioritized_endpoints": [
+      {
+        "endpoint": "/api/checkout",
+        "risk_score": 0.9
+      }
+    ]
+  },
+  "metadata": {
+    "mass_assignment_count": 2,
+    "last_updated": "2026-03-19T20:36:52.644798",
+    "regex_patterns_count": 1,
+    "business_logic_count": 1,
+    "prioritized_endpoints_count": 1
+  }
+}

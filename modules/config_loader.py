@@ -53,6 +53,11 @@ LLM_ENV_MAPPING = {
     'HARZAP_LLM_TEMPERATURE': ('llm', 'temperature', float),
     'HARZAP_LLM_TIMEOUT': ('llm', 'timeout', int),
     'HARZAP_LLM_CACHE_TTL': ('llm', 'cache', 'ttl_hours', int),
+    # Gemini-specific
+    'HARZAP_GEMINI_API_KEY': ('llm', 'gemini_api_key', str),
+    'HARZAP_LLM_BATCH_ENABLED': ('llm', 'batch_enabled', lambda x: x.lower() in ('true', '1', 'yes')),
+    'HARZAP_LLM_BATCH_POLL_INTERVAL': ('llm', 'batch_poll_interval', float),
+    'HARZAP_LLM_BATCH_MAX_WAIT': ('llm', 'batch_max_wait', int),
 }
 
 DEFAULT_CONFIG = {
