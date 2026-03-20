@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: 'HAR.ZAP Dashboards'
+    orgId: 1
+    folder: 'HAR.ZAP'
+    folderUid: 'harzap'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

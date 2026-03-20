@@ -1,0 +1,155 @@
+version: '3.8'
+
+# HAR.ZAP Observability Stack
+# Usage:
+#   ELK:  docker compose -f docker-compose.observability.yml --profile elk up -d
+#   Loki: docker compose -f docker-compose.observability.yml --profile loki up -d
+#   Both: docker compose -f docker-compose.observability.yml --profile elk --profile loki up -d
+
+services:
+  # ==========================================================================
+  # ZAP Proxy
+  # ==========================================================================
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: harzap-zap
+    command: zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.disablekey=true
+    ports:
+      - "8080:8080"
+      - "8090:8090"
+    volumes:
+      - zap-data:/home/zap/.ZAP
+      - ../scripts:/home/zap/scripts:ro
+    networks:
+      - harzap-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/JSON/core/view/version/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # ZAP Log Shipper (Python)
+  # ==========================================================================
+  zap-shipper:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.shipper
+    container_name: harzap-shipper
+    environment:
+      - ZAP_URL=http://zap:8080
+      - LOG_BACKEND=${LOG_BACKEND:-loki}  # loki | elasticsearch
+      - LOKI_URL=http://loki:3100
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - POLL_INTERVAL=5
+    depends_on:
+      zap:
+        condition: service_healthy
+    networks:
+      - harzap-net
+    restart: unless-stopped
+
+  # ==========================================================================
+  # LOKI STACK (lightweight)
+  # ==========================================================================
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: harzap-loki
+    profiles: ["loki"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+      - ./loki-config.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - harzap-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: harzap-grafana
+    profiles: ["loki"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=harzap2024
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - harzap-net
+
+  # ==========================================================================
+  # ELK STACK (full-featured)
+  # ==========================================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: harzap-elasticsearch
+    profiles: ["elk"]
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - harzap-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: harzap-kibana
+    profiles: ["elk"]
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - harzap-net
+
+  # ==========================================================================
+  # Optional: Logstash for advanced parsing
+  # ==========================================================================
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: harzap-logstash
+    profiles: ["elk-full"]
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    environment:
+      - "LS_JAVA_OPTS=-Xms256m -Xmx256m"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - harzap-net
+
+networks:
+  harzap-net:
+    driver: bridge
+
+volumes:
+  zap-data:
+  loki-data:
+  grafana-data:
+  elasticsearch-data:
