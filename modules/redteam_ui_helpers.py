@@ -5,10 +5,10 @@ import streamlit as st
 def show_attack_docs(attack_type):
     """Display attack documentation in expander"""
     doc_mapping = {
-        "Unauthenticated Replay": "docs/redteam/unauthenticated_replay.md",
-        "Mass Assignment": "docs/redteam/mass_assignment.md",
-        "Hidden Parameters": "docs/redteam/hidden_parameters.md",
-        "Race Conditions": "docs/redteam/race_conditions.md"
+        "Unauthenticated Replay": "docs/redteam/UNAUTHENTICATED_REPLAY.md",
+        "Mass Assignment": "docs/redteam/MASS_ASSIGNMENT.md",
+        "Hidden Parameters": "docs/redteam/HIDDEN_PARAMETERS.md",
+        "Race Conditions": "docs/redteam/RACE_CONDITIONS.md"
     }
 
     doc_path = doc_mapping.get(attack_type)
