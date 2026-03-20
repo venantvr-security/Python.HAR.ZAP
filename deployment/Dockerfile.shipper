@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir \
     python-owasp-zap-v2.4 \
     elasticsearch>=8.0.0
 
-COPY docker/zap_shipper.py /app/
+COPY deployment/zap_shipper.py /app/
 
 CMD ["python", "-u", "zap_shipper.py"]
