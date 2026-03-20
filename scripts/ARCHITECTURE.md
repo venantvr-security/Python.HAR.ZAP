@@ -300,18 +300,85 @@ flowchart LR
     style FILES fill:#fff9c4
 ```
 
+## redteam_scanner.js - Scanner Unifié
+
+Script principal combinant 4 vecteurs d'attaque red team:
+
+```mermaid
+flowchart TD
+    START([scan appelé]) --> MA[scanMassAssignment]
+    MA --> UA[scanUnauthReplay]
+    UA --> RC[scanRaceCondition]
+    RC --> IDOR[scanIDOR]
+    IDOR --> END([Fin])
+
+    subgraph MA_DETAIL["Mass Assignment"]
+        MA --> MA1{POST/PUT/PATCH?}
+        MA1 -->|Oui| MA2[Inject hidden params]
+        MA2 --> MA3{Diff > 100 chars?}
+        MA3 -->|Oui| MA4[raiseAlert HIGH]
+    end
+
+    subgraph UA_DETAIL["Unauth Replay"]
+        UA --> UA1{Has auth headers?}
+        UA1 -->|Oui| UA2[Remove all auth]
+        UA2 --> UA3{Status 2xx?}
+        UA3 -->|Oui| UA4[raiseAlert HIGH]
+    end
+
+    subgraph RC_DETAIL["Race Condition"]
+        RC --> RC1{Sensitive endpoint?}
+        RC1 -->|Oui| RC2[5 parallel requests]
+        RC2 --> RC3{Multiple success?}
+        RC3 -->|Oui| RC4[raiseAlert MEDIUM]
+    end
+
+    subgraph IDOR_DETAIL["IDOR"]
+        IDOR --> ID1{Numeric ID in URL?}
+        ID1 -->|Oui| ID2[Test ID ± 1, 0, 100]
+        ID2 --> ID3{Different content?}
+        ID3 -->|Oui| ID4[raiseAlert HIGH]
+    end
+
+    style MA4 fill:#ffcdd2
+    style UA4 fill:#ffcdd2
+    style RC4 fill:#fff9c4
+    style ID4 fill:#ffcdd2
+```
+
+### Paramètres cachés testés (Mass Assignment)
+
+| Catégorie | Paramètres |
+|-----------|------------|
+| Privilèges | admin, isAdmin, role, privilege, permissions |
+| Debug | debug, test, dev, staging, internal |
+| Statut | verified, active, approved, banned, premium, vip |
+| Ownership | user_id, owner_id, account_id, tenant_id |
+| Finance | balance, credit, discount, price, amount |
+
+### Patterns sensibles (Race Condition)
+
+```
+checkout, payment, transfer, withdraw, deposit,
+coupon, discount, promo, redeem, apply,
+cart, order, purchase, buy,
+balance, credit, points, reward,
+vote, like, follow, subscribe
+```
+
 ## Quand utiliser quoi?
 
 | Scénario | Python | JS/ZAP |
 |----------|--------|--------|
 | Analyse HAR offline | ✅ | ❌ |
 | Spider + scan auto | ❌ | ✅ |
-| Race conditions multi-requêtes | ✅ | ❌ |
+| Race conditions | ✅ | ✅ (redteam_scanner.js) |
 | Intégration UI ZAP native | ❌ | ✅ |
 | Payloads JSON complexes | ✅ | ⚠️ |
 | Tests avec état (sessions) | ✅ | ⚠️ |
 | CI/CD headless | ✅ | ✅ |
 | Enrichissement LLM | ✅ | ❌ |
+| IDOR enumeration | ✅ | ✅ (redteam_scanner.js) |
 
 ## Ajout d'un nouveau script
 
