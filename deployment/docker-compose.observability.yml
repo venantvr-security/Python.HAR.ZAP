@@ -34,7 +34,7 @@ services:
   zap-shipper:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.shipper
+      dockerfile: deployment/Dockerfile.shipper
     container_name: harzap-shipper
     environment:
       - ZAP_URL=http://zap:8080

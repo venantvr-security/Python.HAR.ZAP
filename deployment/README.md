@@ -7,7 +7,7 @@ Stack Docker pour visualiser les logs ZAP dans Grafana (Loki) ou Kibana (ELK).
 ### Option 1: Loki + Grafana (recommandé, léger)
 
 ```bash
-cd docker
+cd deployment
 docker compose -f docker-compose.observability.yml --profile loki up -d
 ```
 
@@ -18,7 +18,7 @@ docker compose -f docker-compose.observability.yml --profile loki up -d
 ### Option 2: ELK Stack (full-featured)
 
 ```bash
-cd docker
+cd deployment
 LOG_BACKEND=elasticsearch docker compose -f docker-compose.observability.yml --profile elk up -d
 ```
 
@@ -29,7 +29,7 @@ LOG_BACKEND=elasticsearch docker compose -f docker-compose.observability.yml --p
 ### Option 3: Les deux (dev/comparison)
 
 ```bash
-cd docker
+cd deployment
 docker compose -f docker-compose.observability.yml --profile elk --profile loki up -d
 ```
 
