@@ -13,6 +13,9 @@ from modules.passive_analysis import PassiveAnalysisOrchestrator
 from modules.redteam_attacks import RedTeamOrchestrator
 from modules.redteam_ui_helpers import render_redteam_results, render_passive_results
 from modules.zap_scanner import ZAPScanner
+from modules.workflow_state import (
+    WorkflowState, restore_to_session_state, save_from_session_state
+)
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -36,11 +39,60 @@ if 'extracted_tokens' not in st.session_state:
     st.session_state.extracted_tokens = None
 if 'preprocessed_data' not in st.session_state:
     st.session_state.preprocessed_data = None
+if 'workflow' not in st.session_state:
+    st.session_state.workflow = None
+
+
+def render_workflow_sidebar():
+    """Render workflow progress and resume controls in sidebar."""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Session")
+
+    has_saved = WorkflowState.exists()
+    workflow = st.session_state.workflow
+
+    if workflow is None and has_saved:
+        saved = WorkflowState.load()
+        if saved:
+            done, total = saved.get_progress()
+            st.sidebar.info(f"Session du {saved.session_id[:10]} - {done}/{total}")
+            if st.sidebar.button("Reprendre", key="resume_btn"):
+                st.session_state.workflow = saved
+                restored = restore_to_session_state(saved, st.session_state)
+                st.sidebar.success(f"Restauré : {len(restored)} éléments")
+                st.rerun()
+            if st.sidebar.button("Nouvelle session", key="new_btn"):
+                WorkflowState.delete()
+                st.session_state.workflow = WorkflowState.create_new()
+                st.rerun()
+    elif workflow is None:
+        st.session_state.workflow = WorkflowState.create_new()
+        workflow = st.session_state.workflow
+
+    if workflow:
+        st.sidebar.markdown("**Progression**")
+        icons = {"done": "✅", "in_progress": "🔄", "pending": "⬚", "skipped": "⏭️"}
+        for i, step in enumerate(workflow.steps, 1):
+            icon = icons.get(step.status, "⬚")
+            st.sidebar.text(f"{icon} {i}. {step.name}")
+
+        done, total = workflow.get_progress()
+        st.sidebar.progress(done / total if total > 0 else 0)
+
+        if st.sidebar.button("Réinitialiser la session", key="reset_btn"):
+            WorkflowState.delete()
+            for key in list(st.session_state.keys()):
+                if key != "workflow":
+                    del st.session_state[key]
+            st.session_state.workflow = WorkflowState.create_new()
+            st.rerun()
 
 
 def main():
     st.title("🛡️ DAST Security Platform")
     st.markdown("**Automated Dynamic Application Security Testing with OWASP ZAP**")
+
+    render_workflow_sidebar()
 
     tabs = st.tabs(
         ["📤 Upload & Configure", "🔧 HAR Preprocessing", "🔍 ZAP Scan", "⚡ ZAP Fuzzer", "🎯 IDOR Testing", "🔴 Red Team", "🔵 Passive Scan", "📊 Results", "✅ Acceptance"])
@@ -103,6 +155,11 @@ def render_upload_tab():
 
                 st.session_state.extracted_tokens = extracted_tokens
                 st.session_state.fuzzing_recommendations = fuzzing_recommendations
+
+                # Auto-save workflow
+                if st.session_state.workflow:
+                    save_from_session_state(st.session_state.workflow, st.session_state, "upload")
+                    save_from_session_state(st.session_state.workflow, st.session_state, "tokens")
 
                 # Show extraction summary
                 total_ids = len(extracted_tokens.get('ids', []))
@@ -251,6 +308,10 @@ def launch_zap_scan(parsed_data, selected_indices):
                 'scanner': scanner
             }
 
+            # Auto-save workflow
+            if st.session_state.workflow:
+                save_from_session_state(st.session_state.workflow, st.session_state, "zap_scan")
+
             st.success(f"✓ Scan complete! Found {len(alerts)} alerts")
 
             st.rerun()
@@ -302,6 +363,10 @@ def render_idor_tab():
                 results = detector.run_detection()
                 st.session_state.idor_results = results
                 st.session_state.idor_detector = detector
+
+                # Auto-save workflow
+                if st.session_state.workflow:
+                    save_from_session_state(st.session_state.workflow, st.session_state, "idor")
 
                 summary = detector.get_summary()
 
@@ -391,6 +456,10 @@ def render_redteam_tab():
                 results = orchestrator.run_all_attacks()
 
                 st.session_state.redteam_results = results
+
+                # Auto-save workflow
+                if st.session_state.workflow:
+                    save_from_session_state(st.session_state.workflow, st.session_state, "redteam")
 
                 critical_findings = orchestrator.get_critical_findings()
 
@@ -558,6 +627,10 @@ def render_passive_tab():
                 results = orchestrator.run_all_checks()
 
                 st.session_state.passive_results = results
+
+                # Auto-save workflow
+                if st.session_state.workflow:
+                    save_from_session_state(st.session_state.workflow, st.session_state, "passive")
 
                 summary = orchestrator.generate_summary()
 
@@ -774,6 +847,10 @@ def render_preprocessing_tab():
                 # Process
                 result = preprocessor.process()
                 st.session_state.preprocessed_data = result
+
+                # Auto-save workflow
+                if st.session_state.workflow:
+                    save_from_session_state(st.session_state.workflow, st.session_state, "preprocess")
 
                 st.success("✓ Preprocessing complete!")
 

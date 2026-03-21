@@ -19,6 +19,9 @@ output/
 *.pem
 *.key
 
+# Session state
+.harzap_session.json
+
 # LLM sessions (keep only one example)
 patterns/sessions/*
 !patterns/sessions/2026-03-19_20-36-52_e-commerce/
