@@ -516,9 +516,9 @@ web:
 llm:
   enabled: true
   provider: "gemini"  # "anthropic" | "gemini"
-  model: "gemini-2.0-flash"
+  model: "gemini-3.1-flash-lite-preview"
   # Anthropic models: claude-sonnet-4-20250514, claude-opus-4-20250514
-  # Gemini models: gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash
+  # Gemini models: gemini-3.1-flash-lite-preview, gemini-2.0-flash, gemini-1.5-pro
 
   # Request settings
   max_tokens: 4000
