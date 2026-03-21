@@ -9,17 +9,9 @@
 ## Étape 1: Installation
 
 ```bash
-# Cloner le repo
 git clone https://github.com/venantvr-security/Python.HAR.ZAP.git
 cd Python.HAR.ZAP
-
-# Créer l'environnement virtuel
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate   # Windows
-
-# Installer les dépendances
-pip install -r requirements.txt
+make setup
 ```
 
 ## Étape 2: Configuration
@@ -37,34 +29,17 @@ Contenu minimal de `.env`:
 HARZAP_GEMINI_API_KEY=AIzaSy...votre-clé...
 ```
 
-## Étape 3: Lancer ZAP (Docker)
+## Étape 3: Démarrer (ZAP + Streamlit)
 
 ```bash
-# Terminal 1: Démarrer ZAP
-docker run -u zap -p 8080:8080 -p 8090:8090 \
-  ghcr.io/zaproxy/zaproxy:stable \
-  zap.sh -daemon -host 0.0.0.0 -port 8080 \
-  -config api.addrs.addr.name=.* \
-  -config api.addrs.addr.regex=true \
-  -config api.disablekey=true
+make start
 ```
 
-Vérifier que ZAP est prêt:
-```bash
-curl http://localhost:8080/JSON/core/view/version/
-# Doit retourner: {"version":"2.x.x"}
-```
+Ouvre automatiquement:
+- ZAP: http://localhost:8080
+- Streamlit: http://localhost:8501
 
-## Étape 4: Lancer l'application
-
-```bash
-# Terminal 2: Démarrer l'app Streamlit
-streamlit run app.py
-```
-
-Ouvrir dans le navigateur: http://localhost:8501
-
-## Étape 5: Première analyse
+## Étape 4: Première analyse
 
 1. **Upload HAR**: Glisser un fichier `.har` dans l'interface
    - Obtenir un HAR: DevTools (F12) → Network → Export HAR
@@ -84,11 +59,8 @@ Ouvrir dans le navigateur: http://localhost:8501
 
 ## Optionnel: Dashboard Grafana
 
-Pour visualiser les logs et alertes:
-
 ```bash
-cd deployment
-docker compose -f docker-compose.observability.yml --profile loki up -d
+make observability-up
 ```
 
 - **Grafana**: http://localhost:3000 (admin / harzap2024)
@@ -97,18 +69,11 @@ docker compose -f docker-compose.observability.yml --profile loki up -d
 ## Commandes utiles
 
 ```bash
-# Lancer les tests
-pytest tests/ -v
-
-# Voir la couverture
-pytest tests/ --cov=modules --cov-report=html
-open htmlcov/index.html
-
-# Arrêter ZAP
-docker stop $(docker ps -q --filter ancestor=ghcr.io/zaproxy/zaproxy:stable)
-
-# Arrêter Grafana/Loki
-cd deployment && docker compose -f docker-compose.observability.yml down
+make test          # Lancer les tests
+make test-cov      # Tests avec couverture
+make stop          # Arrêter ZAP + observability
+make zap-logs      # Voir les logs ZAP
+make help          # Liste toutes les commandes
 ```
 
 ## Structure des fichiers importants
@@ -116,12 +81,8 @@ cd deployment && docker compose -f docker-compose.observability.yml down
 - `app.py` - Application Streamlit
 - `config.yaml` - Configuration principale
 - `.env` - Secrets (non commité)
-- `modules/`
-- `har_analyzer.py` - Analyse HAR
-- `redteam_attacks.py` - Attaques red team
-- `llm/` - Intégration LLM
-- `scripts/active/` - Scripts ZAP JS
-- `redteam_scanner.js`
+- `modules/` - Code Python (har_analyzer, redteam_attacks, llm/)
+- `scripts/active/` - Scripts ZAP JS (redteam_scanner.js)
 - `deployment/` - Docker observability
 
 ## Troubleshooting

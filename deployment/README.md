@@ -35,8 +35,11 @@ docker compose -f docker-compose.observability.yml --profile elk --profile loki 
 
 ## Architecture
 
-```
-                                                  ▼
+```mermaid
+flowchart LR
+    ZAP[ZAP proxy] --> Shipper[zap-shipper Python]
+    Shipper --> Storage[Loki / Elasticsearch]
+    Storage --> Dashboard[Grafana / Kibana]
 ```
 
 ## Configuration

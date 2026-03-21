@@ -1,4 +1,4 @@
-.PHONY: help venv install install-dev test test-unit test-bdd test-cov test-fast lint format clean run run-dev docker-up docker-down docker-clean tor-up tor-down tor-status tor-newcircuit status
+.PHONY: help venv install install-dev test test-unit test-bdd test-cov test-fast lint format clean run run-dev orchestrate docker-up docker-down docker-clean tor-up tor-down tor-status tor-newcircuit status setup env-setup check-env start stop app zap-up zap-down zap-logs observability-up observability-down start-full
 
 # Variables
 VENV := .venv
@@ -7,9 +7,12 @@ PIP := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
 BEHAVE := $(VENV)/bin/behave
 UVICORN := $(VENV)/bin/uvicorn
+STREAMLIT := $(VENV)/bin/streamlit
 DOCKER := docker
-COMPOSE := docker-compose
+COMPOSE := docker compose
 PORT := 8000
+ZAP_PORT := 8080
+STREAMLIT_PORT := 8501
 
 # Détection si venv existe
 VENV_EXISTS := $(shell [ -d $(VENV) ] && echo 1 || echo 0)
@@ -192,17 +195,17 @@ run-dev: ## Lance l'interface web en mode développement (hot reload)
 	@echo "$(BLUE)Démarrage en mode dev sur http://localhost:$(PORT)...$(NC)"
 	$(UVICORN) web.api.main:app --host 0.0.0.0 --port $(PORT) --reload
 
-run-cli: ## Lance le scanner en CLI (nécessite HAR_FILE)
+orchestrate: ## Lance l'orchestrateur CLI (nécessite HAR_FILE)
 	@if [ ! -d "$(VENV)" ]; then \
 		echo "$(RED)✗ Virtualenv non trouvé. Lancez 'make install' d'abord$(NC)"; \
 		exit 1; \
 	fi
 	@if [ -z "$(HAR_FILE)" ]; then \
 		echo "$(RED)Erreur: HAR_FILE non spécifié$(NC)"; \
-		echo "$(YELLOW)Usage: make run-cli HAR_FILE=path/to/file.har$(NC)"; \
+		echo "$(YELLOW)Usage: make orchestrate HAR_FILE=path/to/file.har$(NC)"; \
 		exit 1; \
 	fi
-	@echo "$(BLUE)Lancement du scan CLI...$(NC)"
+	@echo "$(BLUE)Lancement de l'orchestrateur...$(NC)"
 	$(PYTHON) orchestrator.py $(HAR_FILE)
 
 docker-up: ## Démarre ZAP dans Docker
@@ -386,5 +389,102 @@ status: ## Affiche le statut de l'environnement
 	fi
 
 all: clean-venv venv install test ## Setup complet: clean + venv + install + test
+
+# =============================================================================
+# QUICKSTART TARGETS
+# =============================================================================
+
+env-setup: ## Crée .env depuis .env.example si absent
+	@if [ ! -f ".env" ]; then \
+		if [ -f ".env.example" ]; then \
+			echo "$(BLUE)Création de .env depuis .env.example...$(NC)"; \
+			cp .env.example .env; \
+			echo "$(YELLOW)⚠ Éditez .env pour ajouter vos clés API$(NC)"; \
+		else \
+			echo "$(RED)✗ .env.example non trouvé$(NC)"; \
+			exit 1; \
+		fi \
+	else \
+		echo "$(GREEN)✓ .env existe déjà$(NC)"; \
+	fi
+
+setup: venv install ## Setup initial: venv + install
+	@echo "$(GREEN)✓ Setup terminé$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Prochaines étapes:$(NC)"
+	@echo "  1. cp .env.example .env && nano .env"
+	@echo "  2. Vérifiez config.yaml"
+	@echo "  3. Lancez: make start"
+
+zap-up: ## Démarre ZAP Docker avec config complète
+	@echo "$(BLUE)Démarrage de ZAP...$(NC)"
+	@$(DOCKER) rm -f harzap-zap 2>/dev/null || true
+	@$(DOCKER) run -d \
+		--name harzap-zap \
+		-p $(ZAP_PORT):8080 \
+		-p 8090:8090 \
+		-v $(PWD)/scripts:/home/zap/scripts:ro \
+		ghcr.io/zaproxy/zaproxy:stable \
+		zap.sh -daemon -host 0.0.0.0 -port 8080 \
+		-config api.addrs.addr.name=.* \
+		-config api.addrs.addr.regex=true \
+		-config api.disablekey=true
+	@echo "$(BLUE)Attente de ZAP...$(NC)"
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -s http://localhost:$(ZAP_PORT)/JSON/core/view/version/ >/dev/null 2>&1; then \
+			echo "$(GREEN)✓ ZAP prêt sur http://localhost:$(ZAP_PORT)$(NC)"; \
+			break; \
+		fi; \
+		echo "  Tentative $$i/10..."; \
+		sleep 2; \
+	done
+
+zap-down: ## Arrête ZAP Docker
+	@echo "$(BLUE)Arrêt de ZAP...$(NC)"
+	@$(DOCKER) stop harzap-zap 2>/dev/null || true
+	@$(DOCKER) rm harzap-zap 2>/dev/null || true
+	@echo "$(GREEN)✓ ZAP arrêté$(NC)"
+
+zap-logs: ## Affiche les logs ZAP
+	@$(DOCKER) logs -f harzap-zap
+
+app: ## Lance l'application Streamlit
+	@if [ ! -d "$(VENV)" ]; then \
+		echo "$(RED)✗ Virtualenv non trouvé. Lancez 'make setup' d'abord$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Démarrage de Streamlit sur http://localhost:$(STREAMLIT_PORT)...$(NC)"
+	$(STREAMLIT) run app.py --server.port $(STREAMLIT_PORT)
+
+check-env: ## Vérifie que .env existe
+	@if [ ! -f ".env" ]; then \
+		echo "$(RED)✗ .env non trouvé$(NC)"; \
+		echo "$(YELLOW)Créez-le: cp .env.example .env && nano .env$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✓ .env trouvé$(NC)"
+
+start: setup check-env zap-up ## Démarre tout: setup + ZAP + app Streamlit
+	@echo "$(GREEN)HAR.ZAP prêt$(NC)"
+	@echo "  ZAP:       http://localhost:$(ZAP_PORT)"
+	@echo "  Streamlit: http://localhost:$(STREAMLIT_PORT)"
+	@$(MAKE) app
+
+stop: zap-down observability-down ## Arrête tous les services
+	@echo "$(GREEN)✓ Tous les services arrêtés$(NC)"
+
+observability-up: ## Démarre Grafana + Loki pour les dashboards
+	@echo "$(BLUE)Démarrage de la stack observability...$(NC)"
+	@cd deployment && $(COMPOSE) -f docker-compose.observability.yml --profile loki up -d
+	@echo "$(GREEN)✓ Grafana: http://localhost:3000 (admin/harzap2024)$(NC)"
+
+observability-down: ## Arrête Grafana + Loki
+	@echo "$(BLUE)Arrêt de la stack observability...$(NC)"
+	@cd deployment && $(COMPOSE) -f docker-compose.observability.yml --profile loki down 2>/dev/null || true
+	@echo "$(GREEN)✓ Stack observability arrêtée$(NC)"
+
+start-full: start observability-up ## Démarre tout + dashboards Grafana
+	@echo "$(GREEN)✓ Stack complète démarrée$(NC)"
+	@echo "  Grafana: http://localhost:3000"
 
 .DEFAULT_GOAL := help

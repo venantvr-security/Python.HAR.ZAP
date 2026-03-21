@@ -43,9 +43,10 @@ One LLM call per HAR, cached by hash. Strategies consume the SecurityPlan.
 
 Session-scoped persistence with ZAP integration:
 
-```
-./patterns/
-```
+- `patterns/sessions/{timestamp}_{name}/` - Session data (session.json, attack results)
+- `patterns/merged/` - Merged patterns
+- `patterns/zap_import/` - Import from ZAP
+- `patterns/zap_export/fuzzers/` - Export for ZAP fuzzers
 
 Operations: GET / ADD / PERSIST / PUSH
 
