@@ -188,29 +188,33 @@ def render_upload_tab():
 
         scope_domains = st.text_area(
             "Scope Domains (one per line)",
-            key="scope_domains"
+            key="scope_domains",
+            help="Only scan these domains. Leave empty for all."
         )
 
         exclude_domains = st.text_area(
             "Exclude Domains (one per line)",
             value="google-analytics.com\ngoogletagmanager.com\nfacebook.com",
-            key="exclude_domains"
+            key="exclude_domains",
+            help="Skip these domains"
         )
 
         scan_types = st.multiselect(
             "Attack Types",
             ["SQL Injection", "XSS", "Path Traversal", "Command Injection", "XXE", "SSRF"],
             default=["SQL Injection", "XSS"],
-            key="scan_types_select"
+            key="scan_types_select",
+            help="Select vulnerability categories to test"
         )
 
         full_assault = st.checkbox(
             "🔥 FULL ZAP ASSAULT (All Policies)",
             value=False,
-            key="full_assault_check"
+            key="full_assault_check",
+            help="Enable all ZAP scan policies (slower but thorough)"
         )
 
-        if st.button("🔍 Analyze HAR", type="primary", key="analyze_har_btn"):
+        if st.button("🔍 Analyze HAR", type="primary", key="analyze_har_btn", help="Parse HAR and extract endpoints"):
             if 'har_data' in st.session_state:
                 with st.spinner("Analyzing HAR file..."):
                     config = {
