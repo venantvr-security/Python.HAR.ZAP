@@ -1,0 +1,209 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "UI texts for HAR.ZAP - edit labels and tooltips here"
+  },
+  "upload_tab": {
+    "har_uploader": {
+      "id": "har_primary",
+      "label": "Upload HAR file",
+      "help": "Upload a HAR (HTTP Archive) file captured from browser DevTools. Press F12 > Network > Export HAR"
+    },
+    "scope_domains": {
+      "id": "scope_domains",
+      "label": "Scope domains (one per line)",
+      "help": "Limit scanning to these domains only. Leave empty to scan all domains found in HAR"
+    },
+    "exclude_domains": {
+      "id": "exclude_domains",
+      "label": "Exclude domains (one per line)",
+      "help": "Skip these domains during scanning (e.g., analytics, CDN)"
+    },
+    "scan_types": {
+      "id": "scan_types_select",
+      "label": "Scan Types",
+      "help": "Select which vulnerability categories to test for"
+    },
+    "full_assault": {
+      "id": "full_assault_check",
+      "label": "FULL ZAP ASSAULT (All Policies)",
+      "help": "Enable all ZAP scan policies. Warning: slower but more thorough"
+    },
+    "analyze_btn": {
+      "id": "analyze_har_btn",
+      "label": "Analyze HAR",
+      "help": "Parse HAR file and extract endpoints, tokens, and parameters"
+    }
+  },
+  "zap_scan_tab": {
+    "target_select": {
+      "id": "target_select",
+      "label": "Select targets",
+      "help": "Choose which endpoints to scan from the analyzed HAR"
+    },
+    "launch_scan_btn": {
+      "id": "launch_zap_scan_btn",
+      "label": "Launch ZAP Scan",
+      "help": "Start active scanning with OWASP ZAP proxy"
+    }
+  },
+  "idor_tab": {
+    "har_user_a": {
+      "id": "har_user_a",
+      "label": "HAR file for User A",
+      "help": "HAR capture from first user session (e.g., admin)"
+    },
+    "har_user_b": {
+      "id": "har_user_b",
+      "label": "HAR file for User B",
+      "help": "HAR capture from second user session (e.g., regular user)"
+    },
+    "parallel_workers": {
+      "id": "parallel_workers",
+      "label": "Parallel Workers",
+      "help": "Number of concurrent requests for IDOR testing (higher = faster but more load)"
+    },
+    "run_idor_btn": {
+      "id": "run_idor_btn",
+      "label": "Run IDOR Detection",
+      "help": "Compare responses between users to detect Insecure Direct Object References"
+    }
+  },
+  "redteam_tab": {
+    "launch_redteam_btn": {
+      "id": "launch_redteam_btn",
+      "label": "Launch Red Team Attacks",
+      "help": "Execute selected offensive security tests against the target"
+    }
+  },
+  "fuzzer_tab": {
+    "fuzzing_type": {
+      "id": "fuzzing_type",
+      "label": "Fuzzing Mode",
+      "help": "Smart: auto-detect targets from HAR. Custom: manually specify URL and parameter"
+    },
+    "custom_url": {
+      "id": "custom_url",
+      "label": "Target URL",
+      "help": "Full URL to fuzz (e.g., https://api.example.com/users/123)"
+    },
+    "custom_param": {
+      "id": "custom_param",
+      "label": "Parameter to fuzz",
+      "help": "Parameter name to inject payloads into"
+    },
+    "wordlist_choice": {
+      "id": "wordlist_choice",
+      "label": "Wordlist",
+      "help": "Select payload source: IDs, usernames, emails extracted from HAR"
+    },
+    "start_fuzzing_btn": {
+      "id": "start_fuzzing_btn",
+      "label": "Start Fuzzing",
+      "help": "Begin fuzzing with selected payloads"
+    },
+    "export_wordlists_btn": {
+      "id": "export_wordlists_btn",
+      "label": "Export to ./wordlists/",
+      "help": "Save extracted tokens as wordlist files for external tools"
+    }
+  },
+  "passive_tab": {
+    "run_passive_btn": {
+      "id": "run_passive_btn",
+      "label": "Run Passive Analysis",
+      "help": "Non-invasive security checks: headers, cookies, sensitive data exposure"
+    }
+  },
+  "results_tab": {
+    "risk_filter": {
+      "id": "risk_filter",
+      "label": "Filter by Risk",
+      "help": "Show only alerts of selected severity level"
+    },
+    "stop_zap_btn": {
+      "id": "stop_zap_btn",
+      "label": "Stop ZAP Container",
+      "help": "Terminate the running ZAP Docker container"
+    }
+  },
+  "preprocess_tab": {
+    "methods_filter": {
+      "id": "methods_filter",
+      "label": "HTTP Methods",
+      "help": "Include only requests with these HTTP methods"
+    },
+    "content_types_filter": {
+      "id": "content_types_filter",
+      "label": "Content Types",
+      "help": "Include only requests with these content types"
+    },
+    "exclude_static": {
+      "id": "exclude_static",
+      "label": "Exclude static resources",
+      "help": "Skip .js, .css, images and other static files"
+    },
+    "domains_filter": {
+      "id": "domains_filter",
+      "label": "Include domains",
+      "help": "Only process these domains (one per line)"
+    },
+    "exclude_domains_filter": {
+      "id": "exclude_domains_preprocess",
+      "label": "Exclude domains",
+      "help": "Skip these domains (one per line)"
+    },
+    "status_codes_filter": {
+      "id": "status_codes_filter",
+      "label": "Status codes",
+      "help": "Only include responses with these status codes (comma-separated)"
+    },
+    "preprocess_btn": {
+      "id": "preprocess_btn",
+      "label": "Preprocess HAR",
+      "help": "Apply filters and extract structured data from HAR"
+    },
+    "output_filename": {
+      "id": "output_filename",
+      "label": "Output filename",
+      "help": "Name for the preprocessed output file"
+    },
+    "save_unified_btn": {
+      "id": "save_unified_btn",
+      "label": "Save Unified File",
+      "help": "Save all extracted data in a single JSON file"
+    },
+    "save_granular_btn": {
+      "id": "save_granular_btn",
+      "label": "Save Granular Extracts",
+      "help": "Save each data type in separate files"
+    }
+  },
+  "acceptance_tab": {
+    "criterion_type": {
+      "id": "criterion_type",
+      "label": "Criterion type",
+      "help": "Type of acceptance check to add"
+    },
+    "max_high_threshold": {
+      "id": "max_high_threshold",
+      "label": "Maximum allowed High alerts",
+      "help": "Fail if more than this many High severity alerts found"
+    },
+    "max_medium_threshold": {
+      "id": "max_medium_threshold",
+      "label": "Maximum allowed Medium alerts",
+      "help": "Fail if more than this many Medium severity alerts found"
+    },
+    "url_pattern": {
+      "id": "url_pattern",
+      "label": "URL pattern",
+      "help": "Regex pattern to match against scanned URLs"
+    },
+    "evaluate_btn": {
+      "id": "evaluate_btn",
+      "label": "Evaluate Acceptance",
+      "help": "Check if scan results meet all defined acceptance criteria"
+    }
+  }
+}

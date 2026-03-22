@@ -16,6 +16,7 @@ from modules.zap_scanner import ZAPScanner
 from modules.workflow_state import (
     WorkflowState, restore_to_session_state, save_from_session_state
 )
+from modules.ui_components import inject_tooltips_js
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -92,6 +93,7 @@ def main():
     st.title("🛡️ DAST Security Platform")
     st.markdown("**Automated Dynamic Application Security Testing with OWASP ZAP**")
 
+    inject_tooltips_js()
     render_workflow_sidebar()
 
     tabs = st.tabs(
@@ -186,24 +188,29 @@ def render_upload_tab():
 
         scope_domains = st.text_area(
             "Scope Domains (one per line)",
-            help="Only scan these domains. Leave empty for all."
+            key="scope_domains"
         )
 
         exclude_domains = st.text_area(
             "Exclude Domains (one per line)",
             value="google-analytics.com\ngoogletagmanager.com\nfacebook.com",
-            help="Skip these domains"
+            key="exclude_domains"
         )
 
         scan_types = st.multiselect(
             "Attack Types",
             ["SQL Injection", "XSS", "Path Traversal", "Command Injection", "XXE", "SSRF"],
-            default=["SQL Injection", "XSS"]
+            default=["SQL Injection", "XSS"],
+            key="scan_types_select"
         )
 
-        full_assault = st.checkbox("🔥 FULL ZAP ASSAULT (All Policies)", value=False)
+        full_assault = st.checkbox(
+            "🔥 FULL ZAP ASSAULT (All Policies)",
+            value=False,
+            key="full_assault_check"
+        )
 
-        if st.button("🔍 Analyze HAR", type="primary"):
+        if st.button("🔍 Analyze HAR", type="primary", key="analyze_har_btn"):
             if 'har_data' in st.session_state:
                 with st.spinner("Analyzing HAR file..."):
                     config = {
