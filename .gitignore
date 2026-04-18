@@ -1,18 +1,28 @@
 # Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
 
 # Virtual environments
 .venv/
+venv/
+env/
 
 # IDE
 .idea/
+.vscode/
 
 # Testing
 .pytest_cache/
 htmlcov/
+.coverage
+.coverage.*
+coverage.xml
 
 # Application
 output/
+*.log
 
 # Secrets
 .env
