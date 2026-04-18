@@ -302,6 +302,11 @@ def launch_zap_scan(parsed_data, selected_indices):
             scanner.configure_scan_policies()
             scanner.populate_site_tree()
 
+            status_text.text("Loading custom scripts...")
+            script_stats = scanner.load_custom_scripts()
+            if script_stats['active'] or script_stats['passive']:
+                st.info(f"Loaded {script_stats['active']} active + {script_stats['passive']} passive scripts")
+
             status_text.text("Executing scans...")
 
             progress_bar = st.progress(0)

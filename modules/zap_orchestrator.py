@@ -121,7 +121,8 @@ class ZAPOrchestrator:
             try:
                 self.rate_limiter.acquire()
                 # Escape dots for regex
-                pattern = f".*{domain.replace('.', '\\\\.')}.*"
+                escaped = domain.replace('.', '\\.')
+                pattern = f".*{escaped}.*"
                 self.zap.context.include_in_context(self.context_name, pattern)
                 logger.debug("domain_included", domain=domain)
             except Exception as e:
@@ -132,7 +133,8 @@ class ZAPOrchestrator:
         for domain in exclude_domains:
             try:
                 self.rate_limiter.acquire()
-                pattern = f".*{domain.replace('.', '\\\\.')}.*"
+                escaped = domain.replace('.', '\\.')
+                pattern = f".*{escaped}.*"
                 self.zap.context.exclude_from_context(self.context_name, pattern)
             except Exception:
                 pass

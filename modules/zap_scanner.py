@@ -3,6 +3,7 @@ ZAP Scanner - Professional DAST automation with retry, rate limiting, and struct
 """
 import time
 from collections import defaultdict
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from zapv2 import ZAPv2
@@ -384,6 +385,38 @@ class ZAPScanner:
 
         logger.info("alerts_retrieved", count=len(alerts), filter=risk_level)
         return alerts
+
+    def load_custom_scripts(self, scripts_dir: Optional[Path] = None) -> Dict[str, int]:
+        """Load custom ZAP scripts (.js) from scripts/{active,passive}/ directories."""
+        if scripts_dir is None:
+            scripts_dir = Path(__file__).parent.parent / 'scripts'
+
+        stats = {'active': 0, 'passive': 0, 'failed': 0}
+        if not scripts_dir.exists():
+            logger.info("scripts_dir_missing", path=str(scripts_dir))
+            return stats
+
+        for script_type in ('active', 'passive'):
+            type_dir = scripts_dir / script_type
+            if not type_dir.exists():
+                continue
+            for script_file in type_dir.glob('*.js'):
+                try:
+                    self.rate_limiter.acquire()
+                    self.zap.script.load(
+                        scriptname=script_file.stem,
+                        scripttype=script_type,
+                        scriptengine='ECMAScript',
+                        filename=str(script_file)
+                    )
+                    self.zap.script.enable(script_file.stem)
+                    stats[script_type] += 1
+                    logger.info("script_loaded", name=script_file.name, type=script_type)
+                except Exception as e:
+                    stats['failed'] += 1
+                    logger.warning("script_load_failed", name=script_file.name, error=str(e))
+
+        return stats
 
     def shutdown(self):
         """Shutdown ZAP gracefully."""

@@ -264,6 +264,8 @@ def run_scan(args):
         scanner.configure_context()
         scanner.configure_scan_policies()
         scanner.populate_site_tree()
+        script_stats = scanner.load_custom_scripts()
+        print(f"[Scripts] {script_stats['active']} active + {script_stats['passive']} passive loaded")
         scan_results = scanner.execute_targeted_scans()
         reporter.add_timeline_event('scan_complete', f'{len(scan_results)} targets scanned')
 

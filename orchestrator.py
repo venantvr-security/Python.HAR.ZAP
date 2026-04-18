@@ -157,21 +157,8 @@ def main():
         print(f"[Adaptive] Adjusted {adjusted} scanners based on FP analysis")
 
         print("\n[8/9] Active scanning (targeted + custom scripts)...")
-        # Load custom ZAP scripts
-        try:
-            script_dir = Path(__file__).parent / 'scripts' / 'active'
-            if script_dir.exists():
-                for script_file in script_dir.glob('*.js'):
-                    scanner.zap.script.load(
-                        scriptname=script_file.stem,
-                        scripttype='active',
-                        scriptengine='ECMAScript',
-                        filename=str(script_file)
-                    )
-                    scanner.zap.script.enable(script_file.stem)
-                    print(f"[Scripts] Loaded {script_file.name}")
-        except Exception as e:
-            print(f"[Scripts] Warning: Could not load scripts: {e}")
+        script_stats = scanner.load_custom_scripts()
+        print(f"[Scripts] Loaded {script_stats['active']} active, {script_stats['passive']} passive ({script_stats['failed']} failed)")
 
         scan_results = scanner.execute_targeted_scans()
         print(f"[Active Scan] Completed {len(scan_results)} scan scenarios")

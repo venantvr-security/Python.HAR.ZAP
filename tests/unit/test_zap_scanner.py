@@ -239,3 +239,51 @@ class TestZAPScanner:
         results = scanner.execute_targeted_scans()
 
         assert len(results) >= 0
+
+    @patch('modules.zap_scanner.ZAPv2')
+    def test_load_custom_scripts_missing_dir(self, mock_zapv2, zap_config, har_data, scan_config, tmp_path):
+        from modules.zap_scanner import ZAPScanner
+
+        mock_zap = Mock()
+        mock_zapv2.return_value = mock_zap
+        scanner = ZAPScanner(zap_config, har_data, scan_config)
+
+        stats = scanner.load_custom_scripts(scripts_dir=tmp_path / "nonexistent")
+        assert stats == {'active': 0, 'passive': 0, 'failed': 0}
+
+    @patch('modules.zap_scanner.ZAPv2')
+    def test_load_custom_scripts_with_files(self, mock_zapv2, zap_config, har_data, scan_config, tmp_path):
+        from modules.zap_scanner import ZAPScanner
+
+        mock_zap = Mock()
+        mock_zapv2.return_value = mock_zap
+        scanner = ZAPScanner(zap_config, har_data, scan_config)
+
+        (tmp_path / "active").mkdir()
+        (tmp_path / "passive").mkdir()
+        (tmp_path / "active" / "jwt_scanner.js").write_text("// test")
+        (tmp_path / "active" / "cors_scanner.js").write_text("// test")
+        (tmp_path / "passive" / "info_leak.js").write_text("// test")
+
+        stats = scanner.load_custom_scripts(scripts_dir=tmp_path)
+        assert stats['active'] == 2
+        assert stats['passive'] == 1
+        assert stats['failed'] == 0
+        assert mock_zap.script.load.call_count == 3
+        assert mock_zap.script.enable.call_count == 3
+
+    @patch('modules.zap_scanner.ZAPv2')
+    def test_load_custom_scripts_handles_failure(self, mock_zapv2, zap_config, har_data, scan_config, tmp_path):
+        from modules.zap_scanner import ZAPScanner
+
+        mock_zap = Mock()
+        mock_zap.script.load.side_effect = Exception("load failed")
+        mock_zapv2.return_value = mock_zap
+        scanner = ZAPScanner(zap_config, har_data, scan_config)
+
+        (tmp_path / "active").mkdir()
+        (tmp_path / "active" / "bad.js").write_text("// test")
+
+        stats = scanner.load_custom_scripts(scripts_dir=tmp_path)
+        assert stats['failed'] == 1
+        assert stats['active'] == 0

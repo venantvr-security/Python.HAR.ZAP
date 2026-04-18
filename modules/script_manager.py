@@ -210,6 +210,9 @@ class ZAPScriptManager:
         confidence: str = 'Medium'
     ) -> str:
         """Generate an active scan script from template."""
+        risk_map = {"Low": 1, "Medium": 2, "High": 3}
+        risk_int = risk_map.get(risk, 2)
+        confidence_int = risk_map.get(confidence, 2)
         template = f'''
 // Active Scan Script: {name}
 // {description}
@@ -223,8 +226,8 @@ function scanNode(as, msg) {{
     for (var i = 0; i < patterns.length; i++) {{
         if (body.indexOf(patterns[i]) >= 0) {{
             as.raiseAlert(
-                {{"Medium": 2, "High": 3, "Low": 1}.get(risk, 2)},
-                {{"Medium": 2, "High": 3, "Low": 1}.get(confidence, 2)},
+                {risk_int},
+                {confidence_int},
                 "{name}",
                 "{description}",
                 uri,
@@ -261,6 +264,8 @@ function scan(as, msg, param, value) {{
         risk: str = 'Informational'
     ) -> str:
         """Generate a passive scan script from template."""
+        risk_map = {"Informational": 0, "Low": 1, "Medium": 2, "High": 3}
+        risk_int = risk_map.get(risk, 0)
         template = f'''
 // Passive Scan Script: {name}
 // {description}
@@ -277,7 +282,7 @@ function scan(ps, msg, src) {{
 
         if (matches) {{
             ps.raiseAlert(
-                {{"Informational": 0, "Low": 1, "Medium": 2, "High": 3}.get(risk, 0)},
+                {risk_int},
                 1,
                 "{name}",
                 "{description}",
