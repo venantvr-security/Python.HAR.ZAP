@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "lang": "en",
+    "name": "English"
+  },
+  "app": {
+    "title": "DAST Security Platform",
+    "subtitle": "Automated Dynamic Application Security Testing with OWASP ZAP"
+  },
+  "lang_selector": {
+    "label": "Language",
+    "help": "Switch between English and French for the app UI. Docs stay in English."
+  },
+  "tabs": {
+    "upload": "Upload & Configure",
+    "preprocess": "HAR Preprocessing",
+    "zap_scan": "ZAP Scan",
+    "fuzzer": "ZAP Fuzzer",
+    "idor": "IDOR Testing",
+    "redteam": "Red Team",
+    "passive": "Passive Scan",
+    "results": "Results",
+    "acceptance": "Acceptance"
+  },
+  "sidebar": {
+    "session_header": "Session",
+    "session_info": "Session from {id} - {done}/{total}",
+    "resume_btn": "Resume",
+    "new_btn": "New session",
+    "progress_header": "Progress",
+    "reset_btn": "Reset session",
+    "restored_toast": "Restored: {n} items"
+  },
+  "scan": {
+    "status_configure": "Configuring scanner...",
+    "status_load_scripts": "Loading custom scripts...",
+    "status_execute": "Executing scans...",
+    "status_collect": "Collecting results...",
+    "scripts_loaded": "Loaded {active} active + {passive} passive scripts",
+    "complete": "Scan complete! Found {n} alerts",
+    "failed": "Scan failed: {err}"
+  },
+  "upload": {
+    "header": "HAR File Upload & Configuration",
+    "primary_file": "Primary HAR File",
+    "config_header": "Scan Configuration",
+    "loaded": "Loaded: {n} requests",
+    "extracted": "Extracted {ids} IDs, {users} usernames, {params} parameters for fuzzing",
+    "parse_error": "Error parsing HAR: {err}",
+    "preview": "Preview URLs"
+  },
+  "idor": {
+    "header": "IDOR Detection",
+    "session_a": "Session A (User A)",
+    "session_b": "Session B (User B)",
+    "missing_files": "Please upload both HAR files",
+    "running": "Running IDOR detection...",
+    "complete": "IDOR detection complete!",
+    "failed": "IDOR detection failed: {err}"
+  },
+  "redteam": {
+    "header": "Red Team Attacks",
+    "missing_har": "Please upload a HAR file first",
+    "config_header": "Attack Configuration",
+    "running": "Running offensive security tests...",
+    "complete": "Red Team scan complete! Found {n} critical issues",
+    "failed": "Red Team scan failed: {err}"
+  },
+  "common": {
+    "yes": "Yes",
+    "no": "No",
+    "ok": "OK",
+    "cancel": "Cancel",
+    "warning_upload_first": "Please upload and analyze a HAR file first"
+  }
+}

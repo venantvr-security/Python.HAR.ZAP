@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "lang": "fr",
+    "name": "Français"
+  },
+  "app": {
+    "title": "Plateforme de sécurité DAST",
+    "subtitle": "Tests de sécurité dynamiques automatisés avec OWASP ZAP"
+  },
+  "lang_selector": {
+    "label": "Langue",
+    "help": "Basculer entre français et anglais pour l'interface. La documentation reste en anglais."
+  },
+  "tabs": {
+    "upload": "Import & Configuration",
+    "preprocess": "Prétraitement HAR",
+    "zap_scan": "Scan ZAP",
+    "fuzzer": "Fuzzer ZAP",
+    "idor": "Tests IDOR",
+    "redteam": "Red Team",
+    "passive": "Scan passif",
+    "results": "Résultats",
+    "acceptance": "Acceptation"
+  },
+  "sidebar": {
+    "session_header": "Session",
+    "session_info": "Session du {id} - {done}/{total}",
+    "resume_btn": "Reprendre",
+    "new_btn": "Nouvelle session",
+    "progress_header": "Progression",
+    "reset_btn": "Réinitialiser la session",
+    "restored_toast": "Restauré : {n} éléments"
+  },
+  "scan": {
+    "status_configure": "Configuration du scanner…",
+    "status_load_scripts": "Chargement des scripts personnalisés…",
+    "status_execute": "Exécution des scans…",
+    "status_collect": "Collecte des résultats…",
+    "scripts_loaded": "{active} scripts actifs + {passive} passifs chargés",
+    "complete": "Scan terminé ! {n} alertes trouvées",
+    "failed": "Échec du scan : {err}"
+  },
+  "upload": {
+    "header": "Import de fichier HAR et configuration",
+    "primary_file": "Fichier HAR principal",
+    "config_header": "Configuration du scan",
+    "loaded": "Chargé : {n} requêtes",
+    "extracted": "Extrait {ids} identifiants, {users} noms d'utilisateur, {params} paramètres pour le fuzzing",
+    "parse_error": "Erreur de lecture du HAR : {err}",
+    "preview": "Aperçu des URLs"
+  },
+  "idor": {
+    "header": "Détection IDOR",
+    "session_a": "Session A (utilisateur A)",
+    "session_b": "Session B (utilisateur B)",
+    "missing_files": "Veuillez importer les deux fichiers HAR",
+    "running": "Détection IDOR en cours…",
+    "complete": "Détection IDOR terminée !",
+    "failed": "Échec de la détection IDOR : {err}"
+  },
+  "redteam": {
+    "header": "Attaques Red Team",
+    "missing_har": "Veuillez d'abord importer un fichier HAR",
+    "config_header": "Configuration des attaques",
+    "running": "Exécution des tests de sécurité offensifs…",
+    "complete": "Scan Red Team terminé ! {n} problèmes critiques trouvés",
+    "failed": "Échec du scan Red Team : {err}"
+  },
+  "common": {
+    "yes": "Oui",
+    "no": "Non",
+    "ok": "OK",
+    "cancel": "Annuler",
+    "warning_upload_first": "Veuillez importer et analyser un fichier HAR en premier"
+  }
+}

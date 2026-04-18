@@ -1,209 +1,432 @@
 {
   "_meta": {
-    "version": "1.0",
-    "description": "UI texts for HAR.ZAP - edit labels and tooltips here"
+    "version": "2.0",
+    "description": "UI texts with i18n (en/fr). English is the default — edit both locales when adding entries.",
+    "langs": ["en", "fr"]
   },
   "upload_tab": {
     "har_uploader": {
       "id": "har_primary",
-      "label": "Upload HAR file",
-      "help": "Upload a HAR (HTTP Archive) file captured from browser DevTools. Press F12 > Network > Export HAR"
+      "label": {
+        "en": "Upload HAR file",
+        "fr": "Importer un fichier HAR"
+      },
+      "help": {
+        "en": "Upload a HAR (HTTP Archive) file captured from browser DevTools. Press F12 > Network > Export HAR",
+        "fr": "Importer un fichier HAR (HTTP Archive) capturé depuis les DevTools du navigateur. F12 > Réseau > Exporter HAR"
+      }
     },
     "scope_domains": {
       "id": "scope_domains",
-      "label": "Scope domains (one per line)",
-      "help": "Limit scanning to these domains only. Leave empty to scan all domains found in HAR"
+      "label": {
+        "en": "Scope domains (one per line)",
+        "fr": "Domaines du périmètre (un par ligne)"
+      },
+      "help": {
+        "en": "Limit scanning to these domains only. Leave empty to scan all domains found in HAR",
+        "fr": "Limiter le scan à ces domaines uniquement. Laisser vide pour scanner tous les domaines trouvés dans le HAR"
+      }
     },
     "exclude_domains": {
       "id": "exclude_domains",
-      "label": "Exclude domains (one per line)",
-      "help": "Skip these domains during scanning (e.g., analytics, CDN)"
+      "label": {
+        "en": "Exclude domains (one per line)",
+        "fr": "Domaines à exclure (un par ligne)"
+      },
+      "help": {
+        "en": "Skip these domains during scanning (e.g., analytics, CDN)",
+        "fr": "Ignorer ces domaines pendant le scan (ex. analytics, CDN)"
+      }
     },
     "scan_types": {
       "id": "scan_types_select",
-      "label": "Scan Types",
-      "help": "Select which vulnerability categories to test for"
+      "label": {
+        "en": "Scan Types",
+        "fr": "Types de scan"
+      },
+      "help": {
+        "en": "Select which vulnerability categories to test for",
+        "fr": "Sélectionner les catégories de vulnérabilités à tester"
+      }
     },
     "full_assault": {
       "id": "full_assault_check",
-      "label": "FULL ZAP ASSAULT (All Policies)",
-      "help": "Enable all ZAP scan policies. Warning: slower but more thorough"
+      "label": {
+        "en": "FULL ZAP ASSAULT (All Policies)",
+        "fr": "ASSAUT ZAP COMPLET (toutes les politiques)"
+      },
+      "help": {
+        "en": "Enable all ZAP scan policies. Warning: slower but more thorough",
+        "fr": "Activer toutes les politiques de scan ZAP. Attention : plus lent mais plus exhaustif"
+      }
     },
     "analyze_btn": {
       "id": "analyze_har_btn",
-      "label": "Analyze HAR",
-      "help": "Parse HAR file and extract endpoints, tokens, and parameters"
+      "label": {
+        "en": "Analyze HAR",
+        "fr": "Analyser le HAR"
+      },
+      "help": {
+        "en": "Parse HAR file and extract endpoints, tokens, and parameters",
+        "fr": "Parser le fichier HAR et extraire les endpoints, tokens et paramètres"
+      }
     }
   },
   "zap_scan_tab": {
     "target_select": {
       "id": "target_select",
-      "label": "Select targets",
-      "help": "Choose which endpoints to scan from the analyzed HAR"
+      "label": {
+        "en": "Select targets",
+        "fr": "Sélectionner les cibles"
+      },
+      "help": {
+        "en": "Choose which endpoints to scan from the analyzed HAR",
+        "fr": "Choisir les endpoints à scanner depuis le HAR analysé"
+      }
     },
     "launch_scan_btn": {
       "id": "launch_zap_scan_btn",
-      "label": "Launch ZAP Scan",
-      "help": "Start active scanning with OWASP ZAP proxy"
+      "label": {
+        "en": "Launch ZAP Scan",
+        "fr": "Lancer le scan ZAP"
+      },
+      "help": {
+        "en": "Start active scanning with OWASP ZAP proxy",
+        "fr": "Démarrer le scan actif avec le proxy OWASP ZAP"
+      }
     }
   },
   "idor_tab": {
     "har_user_a": {
       "id": "har_user_a",
-      "label": "HAR file for User A",
-      "help": "HAR capture from first user session (e.g., admin)"
+      "label": {
+        "en": "HAR file for User A",
+        "fr": "Fichier HAR pour l'utilisateur A"
+      },
+      "help": {
+        "en": "HAR capture from first user session (e.g., admin)",
+        "fr": "Capture HAR de la première session utilisateur (ex. admin)"
+      }
     },
     "har_user_b": {
       "id": "har_user_b",
-      "label": "HAR file for User B",
-      "help": "HAR capture from second user session (e.g., regular user)"
+      "label": {
+        "en": "HAR file for User B",
+        "fr": "Fichier HAR pour l'utilisateur B"
+      },
+      "help": {
+        "en": "HAR capture from second user session (e.g., regular user)",
+        "fr": "Capture HAR de la seconde session utilisateur (ex. utilisateur standard)"
+      }
     },
     "parallel_workers": {
       "id": "parallel_workers",
-      "label": "Parallel Workers",
-      "help": "Number of concurrent requests for IDOR testing (higher = faster but more load)"
+      "label": {
+        "en": "Parallel Workers",
+        "fr": "Workers parallèles"
+      },
+      "help": {
+        "en": "Number of concurrent requests for IDOR testing (higher = faster but more load)",
+        "fr": "Nombre de requêtes concurrentes pour les tests IDOR (plus élevé = plus rapide mais plus de charge)"
+      }
     },
     "run_idor_btn": {
       "id": "run_idor_btn",
-      "label": "Run IDOR Detection",
-      "help": "Compare responses between users to detect Insecure Direct Object References"
+      "label": {
+        "en": "Run IDOR Detection",
+        "fr": "Lancer la détection IDOR"
+      },
+      "help": {
+        "en": "Compare responses between users to detect Insecure Direct Object References",
+        "fr": "Comparer les réponses entre utilisateurs pour détecter les références d'objet directes non sécurisées"
+      }
     }
   },
   "redteam_tab": {
     "launch_redteam_btn": {
       "id": "launch_redteam_btn",
-      "label": "Launch Red Team Attacks",
-      "help": "Execute selected offensive security tests against the target"
+      "label": {
+        "en": "Launch Red Team Attacks",
+        "fr": "Lancer les attaques Red Team"
+      },
+      "help": {
+        "en": "Execute selected offensive security tests against the target",
+        "fr": "Exécuter les tests de sécurité offensifs sélectionnés contre la cible"
+      }
     }
   },
   "fuzzer_tab": {
     "fuzzing_type": {
       "id": "fuzzing_type",
-      "label": "Fuzzing Mode",
-      "help": "Smart: auto-detect targets from HAR. Custom: manually specify URL and parameter"
+      "label": {
+        "en": "Fuzzing Mode",
+        "fr": "Mode de fuzzing"
+      },
+      "help": {
+        "en": "Smart: auto-detect targets from HAR. Custom: manually specify URL and parameter",
+        "fr": "Intelligent : détection auto des cibles depuis le HAR. Personnalisé : URL et paramètre manuels"
+      }
     },
     "custom_url": {
       "id": "custom_url",
-      "label": "Target URL",
-      "help": "Full URL to fuzz (e.g., https://api.example.com/users/123)"
+      "label": {
+        "en": "Target URL",
+        "fr": "URL cible"
+      },
+      "help": {
+        "en": "Full URL to fuzz (e.g., https://api.example.com/users/123)",
+        "fr": "URL complète à fuzzer (ex. https://api.example.com/users/123)"
+      }
     },
     "custom_param": {
       "id": "custom_param",
-      "label": "Parameter to fuzz",
-      "help": "Parameter name to inject payloads into"
+      "label": {
+        "en": "Parameter to fuzz",
+        "fr": "Paramètre à fuzzer"
+      },
+      "help": {
+        "en": "Parameter name to inject payloads into",
+        "fr": "Nom du paramètre dans lequel injecter les payloads"
+      }
     },
     "wordlist_choice": {
       "id": "wordlist_choice",
-      "label": "Wordlist",
-      "help": "Select payload source: IDs, usernames, emails extracted from HAR"
+      "label": {
+        "en": "Wordlist",
+        "fr": "Dictionnaire"
+      },
+      "help": {
+        "en": "Select payload source: IDs, usernames, emails extracted from HAR",
+        "fr": "Sélectionner la source des payloads : IDs, noms d'utilisateur, emails extraits du HAR"
+      }
     },
     "start_fuzzing_btn": {
       "id": "start_fuzzing_btn",
-      "label": "Start Fuzzing",
-      "help": "Begin fuzzing with selected payloads"
+      "label": {
+        "en": "Start Fuzzing",
+        "fr": "Démarrer le fuzzing"
+      },
+      "help": {
+        "en": "Begin fuzzing with selected payloads",
+        "fr": "Lancer le fuzzing avec les payloads sélectionnés"
+      }
     },
     "export_wordlists_btn": {
       "id": "export_wordlists_btn",
-      "label": "Export to ./wordlists/",
-      "help": "Save extracted tokens as wordlist files for external tools"
+      "label": {
+        "en": "Export to ./wordlists/",
+        "fr": "Exporter vers ./wordlists/"
+      },
+      "help": {
+        "en": "Save extracted tokens as wordlist files for external tools",
+        "fr": "Sauvegarder les tokens extraits comme dictionnaires pour outils externes"
+      }
     }
   },
   "passive_tab": {
     "run_passive_btn": {
       "id": "run_passive_btn",
-      "label": "Run Passive Analysis",
-      "help": "Non-invasive security checks: headers, cookies, sensitive data exposure"
+      "label": {
+        "en": "Run Passive Analysis",
+        "fr": "Lancer l'analyse passive"
+      },
+      "help": {
+        "en": "Non-invasive security checks: headers, cookies, sensitive data exposure",
+        "fr": "Vérifications de sécurité non-intrusives : en-têtes, cookies, exposition de données sensibles"
+      }
     }
   },
   "results_tab": {
     "risk_filter": {
       "id": "risk_filter",
-      "label": "Filter by Risk",
-      "help": "Show only alerts of selected severity level"
+      "label": {
+        "en": "Filter by Risk",
+        "fr": "Filtrer par risque"
+      },
+      "help": {
+        "en": "Show only alerts of selected severity level",
+        "fr": "Afficher uniquement les alertes du niveau de sévérité sélectionné"
+      }
     },
     "stop_zap_btn": {
       "id": "stop_zap_btn",
-      "label": "Stop ZAP Container",
-      "help": "Terminate the running ZAP Docker container"
+      "label": {
+        "en": "Stop ZAP Container",
+        "fr": "Arrêter le conteneur ZAP"
+      },
+      "help": {
+        "en": "Terminate the running ZAP Docker container",
+        "fr": "Terminer le conteneur Docker ZAP en cours d'exécution"
+      }
     }
   },
   "preprocess_tab": {
     "methods_filter": {
       "id": "methods_filter",
-      "label": "HTTP Methods",
-      "help": "Include only requests with these HTTP methods"
+      "label": {
+        "en": "HTTP Methods",
+        "fr": "Méthodes HTTP"
+      },
+      "help": {
+        "en": "Include only requests with these HTTP methods",
+        "fr": "Inclure uniquement les requêtes avec ces méthodes HTTP"
+      }
     },
     "content_types_filter": {
       "id": "content_types_filter",
-      "label": "Content Types",
-      "help": "Include only requests with these content types"
+      "label": {
+        "en": "Content Types",
+        "fr": "Types de contenu"
+      },
+      "help": {
+        "en": "Include only requests with these content types",
+        "fr": "Inclure uniquement les requêtes avec ces types de contenu"
+      }
     },
     "exclude_static": {
       "id": "exclude_static",
-      "label": "Exclude static resources",
-      "help": "Skip .js, .css, images and other static files"
+      "label": {
+        "en": "Exclude static resources",
+        "fr": "Exclure les ressources statiques"
+      },
+      "help": {
+        "en": "Skip .js, .css, images and other static files",
+        "fr": "Ignorer les .js, .css, images et autres fichiers statiques"
+      }
     },
     "domains_filter": {
       "id": "domains_filter",
-      "label": "Include domains",
-      "help": "Only process these domains (one per line)"
+      "label": {
+        "en": "Include domains",
+        "fr": "Domaines à inclure"
+      },
+      "help": {
+        "en": "Only process these domains (one per line)",
+        "fr": "Traiter uniquement ces domaines (un par ligne)"
+      }
     },
     "exclude_domains_filter": {
       "id": "exclude_domains_preprocess",
-      "label": "Exclude domains",
-      "help": "Skip these domains (one per line)"
+      "label": {
+        "en": "Exclude domains",
+        "fr": "Domaines à exclure"
+      },
+      "help": {
+        "en": "Skip these domains (one per line)",
+        "fr": "Ignorer ces domaines (un par ligne)"
+      }
     },
     "status_codes_filter": {
       "id": "status_codes_filter",
-      "label": "Status codes",
-      "help": "Only include responses with these status codes (comma-separated)"
+      "label": {
+        "en": "Status codes",
+        "fr": "Codes de statut"
+      },
+      "help": {
+        "en": "Only include responses with these status codes (comma-separated)",
+        "fr": "Inclure uniquement les réponses avec ces codes de statut (séparés par virgules)"
+      }
     },
     "preprocess_btn": {
       "id": "preprocess_btn",
-      "label": "Preprocess HAR",
-      "help": "Apply filters and extract structured data from HAR"
+      "label": {
+        "en": "Preprocess HAR",
+        "fr": "Prétraiter le HAR"
+      },
+      "help": {
+        "en": "Apply filters and extract structured data from HAR",
+        "fr": "Appliquer les filtres et extraire les données structurées du HAR"
+      }
     },
     "output_filename": {
       "id": "output_filename",
-      "label": "Output filename",
-      "help": "Name for the preprocessed output file"
+      "label": {
+        "en": "Output filename",
+        "fr": "Nom du fichier de sortie"
+      },
+      "help": {
+        "en": "Name for the preprocessed output file",
+        "fr": "Nom pour le fichier de sortie prétraité"
+      }
     },
     "save_unified_btn": {
       "id": "save_unified_btn",
-      "label": "Save Unified File",
-      "help": "Save all extracted data in a single JSON file"
+      "label": {
+        "en": "Save Unified File",
+        "fr": "Enregistrer le fichier unifié"
+      },
+      "help": {
+        "en": "Save all extracted data in a single JSON file",
+        "fr": "Sauvegarder toutes les données extraites dans un seul fichier JSON"
+      }
     },
     "save_granular_btn": {
       "id": "save_granular_btn",
-      "label": "Save Granular Extracts",
-      "help": "Save each data type in separate files"
+      "label": {
+        "en": "Save Granular Extracts",
+        "fr": "Enregistrer les extraits granulaires"
+      },
+      "help": {
+        "en": "Save each data type in separate files",
+        "fr": "Sauvegarder chaque type de données dans des fichiers séparés"
+      }
     }
   },
   "acceptance_tab": {
     "criterion_type": {
       "id": "criterion_type",
-      "label": "Criterion type",
-      "help": "Type of acceptance check to add"
+      "label": {
+        "en": "Criterion type",
+        "fr": "Type de critère"
+      },
+      "help": {
+        "en": "Type of acceptance check to add",
+        "fr": "Type de vérification d'acceptation à ajouter"
+      }
     },
     "max_high_threshold": {
       "id": "max_high_threshold",
-      "label": "Maximum allowed High alerts",
-      "help": "Fail if more than this many High severity alerts found"
+      "label": {
+        "en": "Maximum allowed High alerts",
+        "fr": "Nombre max d'alertes High autorisées"
+      },
+      "help": {
+        "en": "Fail if more than this many High severity alerts found",
+        "fr": "Échouer si plus d'alertes de sévérité High trouvées que cette valeur"
+      }
     },
     "max_medium_threshold": {
       "id": "max_medium_threshold",
-      "label": "Maximum allowed Medium alerts",
-      "help": "Fail if more than this many Medium severity alerts found"
+      "label": {
+        "en": "Maximum allowed Medium alerts",
+        "fr": "Nombre max d'alertes Medium autorisées"
+      },
+      "help": {
+        "en": "Fail if more than this many Medium severity alerts found",
+        "fr": "Échouer si plus d'alertes de sévérité Medium trouvées que cette valeur"
+      }
     },
     "url_pattern": {
       "id": "url_pattern",
-      "label": "URL pattern",
-      "help": "Regex pattern to match against scanned URLs"
+      "label": {
+        "en": "URL pattern",
+        "fr": "Motif d'URL"
+      },
+      "help": {
+        "en": "Regex pattern to match against scanned URLs",
+        "fr": "Motif regex à matcher contre les URLs scannées"
+      }
     },
     "evaluate_btn": {
       "id": "evaluate_btn",
-      "label": "Evaluate Acceptance",
-      "help": "Check if scan results meet all defined acceptance criteria"
+      "label": {
+        "en": "Evaluate Acceptance",
+        "fr": "Évaluer l'acceptation"
+      },
+      "help": {
+        "en": "Check if scan results meet all defined acceptance criteria",
+        "fr": "Vérifier si les résultats du scan respectent tous les critères d'acceptation définis"
+      }
     }
   }
 }

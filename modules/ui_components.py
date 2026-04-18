@@ -1,9 +1,11 @@
-"""Decoupled UI components with externalized texts and tooltips."""
+"""Decoupled UI components with externalized texts, i18n and tooltips."""
 import json
 from pathlib import Path
 from typing import Any, List, Optional
 
 import streamlit as st
+
+from .i18n import pick_localized, get_lang
 
 _UI_TEXTS = None
 _JS_INJECTED = False
@@ -22,10 +24,15 @@ def _load_texts() -> dict:
     return _UI_TEXTS
 
 
-def get_text(tab: str, ctrl: str, field: str = "label") -> str:
-    """Get text from UI texts JSON."""
+def get_text(tab: str, ctrl: str, field: str = "label", lang: Optional[str] = None) -> str:
+    """Get localized text from UI texts JSON.
+
+    Supports both legacy schema (label/help as plain strings) and the
+    multilang schema (label/help as {en, fr} dicts).
+    """
     texts = _load_texts()
-    return texts.get(tab, {}).get(ctrl, {}).get(field, "")
+    value = texts.get(tab, {}).get(ctrl, {}).get(field, "")
+    return pick_localized(value, lang=lang)
 
 
 def file_uploader(tab: str, ctrl: str, *, types: List[str], key: str, **kwargs) -> Any:
@@ -101,12 +108,35 @@ def reload_texts():
 
 
 def inject_tooltips_js():
-    """Inject JavaScript for dynamic tooltips based on control IDs."""
+    """Inject JavaScript for dynamic tooltips based on control IDs.
+
+    Re-injects when the selected language changes so tooltips stay in sync.
+    """
     global _JS_INJECTED
-    if _JS_INJECTED:
+    lang = get_lang()
+    marker = f"{lang}"
+    if _JS_INJECTED == marker:
         return
 
-    texts = _load_texts()
+    raw = _load_texts()
+    # Flatten {label: {en, fr}, help: {en, fr}} → {label: str, help: str} for the picked lang
+    texts = {}
+    for tab, controls in raw.items():
+        if tab.startswith("_") or not isinstance(controls, dict):
+            texts[tab] = controls
+            continue
+        texts[tab] = {}
+        for ctrl, cfg in controls.items():
+            if not isinstance(cfg, dict):
+                texts[tab][ctrl] = cfg
+                continue
+            flat = {}
+            for k, v in cfg.items():
+                if isinstance(v, dict) and ("en" in v or "fr" in v):
+                    flat[k] = pick_localized(v, lang=lang)
+                else:
+                    flat[k] = v
+            texts[tab][ctrl] = flat
     texts_json = json.dumps(texts)
 
     js_code = f"""
@@ -148,7 +178,7 @@ def inject_tooltips_js():
     """
 
     st.markdown(js_code, unsafe_allow_html=True)
-    _JS_INJECTED = True
+    _JS_INJECTED = marker
 
 
 def get_all_texts() -> dict:

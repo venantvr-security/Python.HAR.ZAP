@@ -183,7 +183,7 @@ class TestUIComponents:
         assert "unsafe_allow_html" in call_args[1]
         assert call_args[1]["unsafe_allow_html"] is True
         assert "UITexts" in call_args[0][0]
-        assert uic._JS_INJECTED is True
+        assert uic._JS_INJECTED
 
     @patch("modules.ui_components.st")
     def test_inject_tooltips_js_only_once(self, mock_st):
@@ -203,7 +203,7 @@ class TestUITextsJSON:
             texts = json.load(f)
 
         assert "_meta" in texts
-        assert texts["_meta"]["version"] == "1.0"
+        assert texts["_meta"]["version"] == "2.0"
 
     def test_all_controls_have_required_fields(self):
         ui_file = Path(__file__).parent.parent.parent / "ui_texts.json"
