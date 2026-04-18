@@ -17,6 +17,11 @@ from modules.workflow_state import (
     WorkflowState, restore_to_session_state, save_from_session_state
 )
 from modules.ui_components import inject_tooltips_js
+from modules.i18n import t, SUPPORTED_LANGS, DEFAULT_LANG, load_locale
+from modules.correlator import correlate_alerts, correlation_summary
+from modules.har_diff import diff_hars
+from modules.script_reports import collect_reports, summary as script_summary
+from modules.reporter import Reporter
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -24,6 +29,8 @@ st.set_page_config(
     layout="wide"
 )
 
+if 'lang' not in st.session_state:
+    st.session_state.lang = DEFAULT_LANG
 if 'scan_results' not in st.session_state:
     st.session_state.scan_results = None
 if 'idor_results' not in st.session_state:
@@ -44,10 +51,30 @@ if 'workflow' not in st.session_state:
     st.session_state.workflow = None
 
 
+def render_language_selector():
+    """Render a language selector at the top of the sidebar."""
+    names = {lang: load_locale(lang).get("_meta", {}).get("name", lang) for lang in SUPPORTED_LANGS}
+    current = st.session_state.get("lang", DEFAULT_LANG)
+    labels = [f"{names[lang]}" for lang in SUPPORTED_LANGS]
+    index = SUPPORTED_LANGS.index(current) if current in SUPPORTED_LANGS else 0
+    choice = st.sidebar.selectbox(
+        t("lang_selector.label"),
+        options=list(range(len(SUPPORTED_LANGS))),
+        format_func=lambda i: labels[i],
+        index=index,
+        key="lang_selector",
+        help=t("lang_selector.help"),
+    )
+    picked = SUPPORTED_LANGS[choice]
+    if picked != current:
+        st.session_state.lang = picked
+        st.rerun()
+
+
 def render_workflow_sidebar():
     """Render workflow progress and resume controls in sidebar."""
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Session")
+    st.sidebar.subheader(t("sidebar.session_header"))
 
     has_saved = WorkflowState.exists()
     workflow = st.session_state.workflow
@@ -56,13 +83,13 @@ def render_workflow_sidebar():
         saved = WorkflowState.load()
         if saved:
             done, total = saved.get_progress()
-            st.sidebar.info(f"Session du {saved.session_id[:10]} - {done}/{total}")
-            if st.sidebar.button("Reprendre", key="resume_btn"):
+            st.sidebar.info(t("sidebar.session_info", id=saved.session_id[:10], done=done, total=total))
+            if st.sidebar.button(t("sidebar.resume_btn"), key="resume_btn"):
                 st.session_state.workflow = saved
                 restored = restore_to_session_state(saved, st.session_state)
-                st.sidebar.success(f"Restauré : {len(restored)} éléments")
+                st.sidebar.success(t("sidebar.restored_toast", n=len(restored)))
                 st.rerun()
-            if st.sidebar.button("Nouvelle session", key="new_btn"):
+            if st.sidebar.button(t("sidebar.new_btn"), key="new_btn"):
                 WorkflowState.delete()
                 st.session_state.workflow = WorkflowState.create_new()
                 st.rerun()
@@ -71,7 +98,7 @@ def render_workflow_sidebar():
         workflow = st.session_state.workflow
 
     if workflow:
-        st.sidebar.markdown("**Progression**")
+        st.sidebar.markdown(f"**{t('sidebar.progress_header')}**")
         icons = {"done": "✅", "in_progress": "🔄", "pending": "⬚", "skipped": "⏭️"}
         for i, step in enumerate(workflow.steps, 1):
             icon = icons.get(step.status, "⬚")
@@ -80,7 +107,7 @@ def render_workflow_sidebar():
         done, total = workflow.get_progress()
         st.sidebar.progress(done / total if total > 0 else 0)
 
-        if st.sidebar.button("Réinitialiser la session", key="reset_btn"):
+        if st.sidebar.button(t("sidebar.reset_btn"), key="reset_btn"):
             WorkflowState.delete()
             for key in list(st.session_state.keys()):
                 if key != "workflow":
@@ -90,14 +117,25 @@ def render_workflow_sidebar():
 
 
 def main():
-    st.title("🛡️ DAST Security Platform")
-    st.markdown("**Automated Dynamic Application Security Testing with OWASP ZAP**")
+    st.title(f"🛡️ {t('app.title')}")
+    st.markdown(f"**{t('app.subtitle')}**")
 
+    render_language_selector()
     inject_tooltips_js()
     render_workflow_sidebar()
 
-    tabs = st.tabs(
-        ["📤 Upload & Configure", "🔧 HAR Preprocessing", "🔍 ZAP Scan", "⚡ ZAP Fuzzer", "🎯 IDOR Testing", "🔴 Red Team", "🔵 Passive Scan", "📊 Results", "✅ Acceptance"])
+    tab_labels = [
+        f"📤 {t('tabs.upload')}",
+        f"🔧 {t('tabs.preprocess')}",
+        f"🔍 {t('tabs.zap_scan')}",
+        f"⚡ {t('tabs.fuzzer')}",
+        f"🎯 {t('tabs.idor')}",
+        f"🔴 {t('tabs.redteam')}",
+        f"🔵 {t('tabs.passive')}",
+        f"📊 {t('tabs.results')}",
+        f"✅ {t('tabs.acceptance')}",
+    ]
+    tabs = st.tabs(tab_labels)
 
     with tabs[0]:
         render_upload_tab()
@@ -318,10 +356,30 @@ def launch_zap_scan(parsed_data, selected_indices):
 
             alerts = scanner.get_alerts()
 
+            # Correlate alerts with HAR entries so the UI can link each
+            # finding back to the original captured request.
+            har_raw = st.session_state.get('har_data') or {}
+            correlated = correlate_alerts(alerts, har_raw)
+            enriched_alerts = [c.to_dict() for c in correlated]
+
+            # Attach a curl_reproduce field so the report and UI always expose
+            # a one-liner to replay the vulnerable request.
+            reporter = Reporter(output_dir='./output')
+            enriched_alerts = reporter.enrich_findings(enriched_alerts)
+
+            # Pull the JS scripts' outputs from ZAP — otherwise they run blind.
+            try:
+                reports = collect_reports(scanner.zap)
+            except Exception:
+                reports = []
+
             st.session_state.scan_results = {
-                'alerts': alerts,
+                'alerts': enriched_alerts,
                 'scan_results': scan_results,
-                'scanner': scanner
+                'scanner': scanner,
+                'correlation_summary': correlation_summary(correlated),
+                'script_reports': [r.to_dict() for r in reports],
+                'script_reports_summary': script_summary(reports),
             }
 
             # Auto-save workflow
@@ -359,6 +417,27 @@ def render_idor_tab():
         har_b = st.file_uploader("HAR file for User B", type=['har'], key='har_user_b')
 
     max_workers = st.slider("Parallel Workers", 1, 10, 5)
+
+    if har_a and har_b:
+        try:
+            session_a_preview = json.load(har_a)
+            har_a.seek(0)
+            session_b_preview = json.load(har_b)
+            har_b.seek(0)
+            with st.expander("🔍 HAR diff — endpoints only in one session (likely IDOR candidates)"):
+                diff = diff_hars(session_a_preview, session_b_preview).to_dict()
+                cols = st.columns(3)
+                cols[0].metric("Only in A", diff['summary']['only_a'])
+                cols[1].metric("Only in B", diff['summary']['only_b'])
+                cols[2].metric("IDOR candidates", diff['summary']['idor_candidates'])
+                if diff['only_in_b']:
+                    st.markdown("**Endpoints only in B (privileged?):**")
+                    st.write(diff['only_in_b'][:20])
+                if diff['idor_candidates']:
+                    st.markdown("**Best IDOR targets (2xx + id-like path segment):**")
+                    st.dataframe(diff['idor_candidates'][:20], use_container_width=True)
+        except Exception as e:
+            st.warning(f"HAR diff preview unavailable: {e}")
 
     if st.button("🔬 Run IDOR Detection", type="primary"):
         if not har_a or not har_b:
@@ -693,16 +772,53 @@ def render_results_tab():
 def render_zap_results():
     st.subheader("ZAP Scan Results")
 
-    alerts = st.session_state.scan_results['alerts']
+    results = st.session_state.scan_results
+    alerts = results['alerts']
 
     high = [a for a in alerts if a.get('risk') == 'High']
     medium = [a for a in alerts if a.get('risk') == 'Medium']
     low = [a for a in alerts if a.get('risk') == 'Low']
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("🔴 High", len(high))
     col2.metric("🟠 Medium", len(medium))
     col3.metric("🟡 Low", len(low))
+
+    corr_summary = results.get('correlation_summary') or {}
+    matched = sum(v for k, v in corr_summary.items() if k != 'none')
+    col4.metric("🔗 Correlated to HAR", f"{matched}/{len(alerts)}")
+
+    with st.expander("HAR correlation breakdown"):
+        st.write(corr_summary)
+        st.caption("exact > normalized > path > domain > none — higher confidence means the alert cleanly maps to a HAR entry.")
+
+    script_reports = results.get('script_reports') or []
+    if script_reports:
+        with st.expander(f"📜 ZAP JS script reports ({len(script_reports)})"):
+            scr_sum = results.get('script_reports_summary') or {}
+            st.caption(
+                f"{scr_sum.get('enabled', 0)}/{scr_sum.get('total', 0)} enabled · "
+                f"{scr_sum.get('with_findings', 0)} produced findings · "
+                f"{scr_sum.get('errored', 0)} errored"
+            )
+            for rep in script_reports:
+                head = f"[{rep['type']}] {rep['name']}"
+                if rep['has_error']:
+                    head = f"❌ {head}"
+                elif rep['findings']:
+                    head = f"🎯 {head} ({rep['finding_count']} findings)"
+                elif rep['enabled']:
+                    head = f"🟢 {head} (no finding)"
+                else:
+                    head = f"⚪ {head} (disabled)"
+                with st.container():
+                    st.markdown(f"**{head}**")
+                    if rep['error_message']:
+                        st.error(rep['error_message'])
+                    if rep['findings']:
+                        st.json(rep['findings'])
+                    elif rep['raw_output']:
+                        st.code(rep['raw_output'][:500], language=None)
 
     risk_filter = st.selectbox("Filter by Risk", ["All", "High", "Medium", "Low"])
 
@@ -712,12 +828,23 @@ def render_zap_results():
 
     for alert in filtered[:20]:
         with st.expander(f"[{alert.get('risk')}] {alert.get('alert')}"):
+            correlation = alert.get('correlation') or {}
             st.write(f"**URL:** {alert.get('url')}")
+            if correlation.get('har_entry_index') is not None:
+                st.write(
+                    f"**HAR entry:** #{correlation['har_entry_index']} · "
+                    f"confidence `{correlation['confidence']}` · "
+                    f"status `{correlation.get('response_status')}`"
+                )
             st.write(f"**CWE:** {alert.get('cweid')}")
             st.write(f"**Description:** {alert.get('description')}")
             st.code(f"Attack: {alert.get('attack', 'N/A')}", language=None)
             st.code(f"Evidence: {alert.get('evidence', 'N/A')}", language=None)
             st.write(f"**Solution:** {alert.get('solution')}")
+            curl = alert.get('curl_reproduce')
+            if curl:
+                st.markdown("**Reproduce:**")
+                st.code(curl, language="bash")
 
     if st.button("🛑 Stop ZAP Container"):
         if st.session_state.docker_manager:
