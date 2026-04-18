@@ -154,7 +154,8 @@ class TestReporter:
             curl = reporter._generate_curl(alert)
 
             assert '-X POST' in curl
-            assert "-d 'username=admin'" in curl
+            assert "username=admin" in curl
+            assert ("--data-raw" in curl) or ("-d " in curl)
 
     def test_risk_to_sarif_level(self):
         from modules.reporter import Reporter

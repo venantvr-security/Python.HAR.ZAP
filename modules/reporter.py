@@ -266,41 +266,73 @@ class Reporter:
 
     def _generate_curl(self, alert: Dict) -> str:
         """Generate cURL command to reproduce the vulnerability."""
-        url = alert.get('url', '')
-        method = alert.get('method', 'GET')
+        return self.generate_curl(alert)
+
+    @staticmethod
+    def generate_curl(alert: Dict) -> str:
+        """Build a cURL command from an alert dict — public for UI reuse.
+
+        Uses the HAR entry attached by `correlator.correlate_alerts` when available
+        so the reproduction includes original headers and body.
+        """
+        correlation = alert.get('correlation') or {}
+        har_req = alert.get('har_request') or {}
+        url = correlation.get('request_url') or har_req.get('url') or alert.get('url', '')
+        method = (correlation.get('request_method') or har_req.get('method') or alert.get('method') or 'GET').upper()
         attack = alert.get('attack', '')
         param = alert.get('param', '')
         evidence = alert.get('evidence', '')
 
         cmd_parts = ['curl']
-
-        # Method
         if method != 'GET':
             cmd_parts.append(f'-X {method}')
 
-        # Headers
-        cmd_parts.append("-H 'User-Agent: HAR-ZAP-Reproduction'")
+        seen_headers = set()
+        for h in har_req.get('headers') or []:
+            name = h.get('name', '')
+            value = h.get('value', '')
+            if not name or name.lower() in seen_headers:
+                continue
+            if name.lower() in {'content-length', 'host'}:
+                continue
+            seen_headers.add(name.lower())
+            escaped = value.replace("'", "'\\''")
+            cmd_parts.append(f"-H '{name}: {escaped}'")
 
-        # Data for POST
-        if method in ['POST', 'PUT', 'PATCH']:
-            if attack:
-                cmd_parts.append(f"-d '{param}={attack}'")
-            cmd_parts.append("-H 'Content-Type: application/x-www-form-urlencoded'")
+        if 'user-agent' not in seen_headers:
+            cmd_parts.append("-H 'User-Agent: HAR-ZAP-Reproduction'")
 
-        # URL with attack payload in query if GET
-        if method == 'GET' and attack and param:
-            if '?' in url:
-                url += f'&{param}={attack}'
-            else:
-                url += f'?{param}={attack}'
+        post_data = har_req.get('postData') or {}
+        body_text = post_data.get('text')
+        if method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+            if body_text:
+                escaped_body = body_text.replace("'", "'\\''")
+                cmd_parts.append(f"--data-raw '{escaped_body}'")
+            elif attack and param:
+                cmd_parts.append(f"--data-raw '{param}={attack}'")
+                if 'content-type' not in seen_headers:
+                    cmd_parts.append("-H 'Content-Type: application/x-www-form-urlencoded'")
+
+        if method == 'GET' and attack and param and not har_req:
+            url += ('&' if '?' in url else '?') + f'{param}={attack}'
 
         cmd_parts.append(f"'{url}'")
-
-        # Add comment with evidence
         if evidence:
-            cmd_parts.append(f"# Evidence: {evidence[:50]}")
-
+            cmd_parts.append(f"# Evidence: {evidence[:80]}")
         return ' '.join(cmd_parts)
+
+    def enrich_findings(self, alerts: List[Dict]) -> List[Dict]:
+        """Attach `curl_reproduce` + preserve correlation metadata on each alert.
+
+        This is the single call to make before rendering alerts anywhere so
+        the pentester always has a reproducible command next to the finding.
+        """
+        out = []
+        for alert in alerts:
+            enriched = dict(alert)
+            enriched['curl_reproduce'] = self.generate_curl(alert)
+            out.append(enriched)
+        return out
 
     def generate_executive_summary(self, alerts: List[Dict], scan_duration: Optional[str] = None) -> Dict:
         """Generate executive summary for management."""

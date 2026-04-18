@@ -27,6 +27,9 @@ class TimingResult:
     severity: str = "High"
     cwe: str = "CWE-208"
     cvss: float = 7.5
+    verdict: str = "INCONCLUSIVE"      # LIKELY_VULNERABLE | INCONCLUSIVE | NOT_VULNERABLE
+    z_score: float = 0.0
+    explanation: str = ""
 
 
 @dataclass
@@ -341,6 +344,43 @@ class TimingAnalyzer:
 
         stats.calculate()
         return stats
+
+    @staticmethod
+    def compute_verdict(baseline: TimingStats, payload_stats: TimingStats,
+                        z_threshold: float = 3.0) -> Tuple[str, float, str]:
+        """
+        Compute a human-readable verdict for a timing comparison.
+
+        Returns (verdict, z_score, explanation). Verdict is one of:
+          - LIKELY_VULNERABLE: payload response is significantly slower (|Z| > threshold)
+          - INCONCLUSIVE: insufficient samples or weak signal
+          - NOT_VULNERABLE: response times comparable
+
+        This removes the need for the pentester to interpret raw std_dev.
+        """
+        if len(baseline.samples) < 3 or len(payload_stats.samples) < 3:
+            return "INCONCLUSIVE", 0.0, "Not enough samples (need at least 3 per side)"
+        if baseline.std_dev == 0:
+            # No variance in baseline — fall back to absolute delta
+            delta = payload_stats.mean - baseline.mean
+            if delta > 2.0:
+                return "LIKELY_VULNERABLE", float("inf"), (
+                    f"Baseline has zero variance; payload mean is {delta:.2f}s slower"
+                )
+            return "NOT_VULNERABLE", 0.0, "Baseline has zero variance and payload is comparable"
+
+        z = (payload_stats.mean - baseline.mean) / baseline.std_dev
+        if z >= z_threshold:
+            return "LIKELY_VULNERABLE", z, (
+                f"Payload mean {payload_stats.mean:.2f}s is {z:.2f} standard deviations "
+                f"above baseline {baseline.mean:.2f}s (threshold {z_threshold})"
+            )
+        if z > 1.0:
+            return "INCONCLUSIVE", z, (
+                f"Moderate signal: Z={z:.2f}, below threshold {z_threshold}. "
+                "Increase sample count or retry."
+            )
+        return "NOT_VULNERABLE", z, f"Z={z:.2f}, no significant timing difference"
 
     def analyze_timing_difference(self, baseline: TimingStats,
                                    payload_stats: TimingStats) -> Tuple[bool, float]:

@@ -4,7 +4,7 @@ Passive Security Analysis - Headers, Leaks, Token Entropy
 import math
 import re
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -375,7 +375,7 @@ class PassiveAnalysisOrchestrator:
         return sorted(critical, key=lambda x: (x.severity, x.title))
 
     def generate_summary(self) -> Dict:
-        """Generate summary statistics"""
+        """Generate summary statistics with a posture score (0-10)."""
         all_issues = []
         for issues in self.results.values():
             all_issues.extend(issues)
@@ -392,11 +392,71 @@ class PassiveAnalysisOrchestrator:
         for issue in all_issues:
             category_counts[issue.category] = category_counts.get(issue.category, 0) + 1
 
+        score, grade, rationale = self._compute_posture_score(severity_counts)
+        grouped = self._group_by_category(all_issues)
+
         return {
             'total_issues': len(all_issues),
             'by_severity': severity_counts,
-            'by_category': category_counts
+            'by_category': category_counts,
+            'posture': {
+                'score': score,
+                'grade': grade,
+                'rationale': rationale,
+            },
+            'grouped': grouped,
         }
+
+    @staticmethod
+    def _compute_posture_score(severity_counts: Dict[str, int]) -> Tuple[float, str, str]:
+        """
+        Posture score starts at 10 and loses points per severity:
+          - CRITICAL: -2 each (capped at -6)
+          - HIGH:     -1 each (capped at -4)
+          - MEDIUM:   -0.5 each (capped at -3)
+          - LOW:      -0.1 each (capped at -1)
+        """
+        critical_penalty = min(severity_counts.get('CRITICAL', 0) * 2.0, 6.0)
+        high_penalty = min(severity_counts.get('HIGH', 0) * 1.0, 4.0)
+        medium_penalty = min(severity_counts.get('MEDIUM', 0) * 0.5, 3.0)
+        low_penalty = min(severity_counts.get('LOW', 0) * 0.1, 1.0)
+
+        score = max(0.0, 10.0 - critical_penalty - high_penalty - medium_penalty - low_penalty)
+        score = round(score, 1)
+
+        if score >= 9.0:
+            grade = 'A'
+        elif score >= 7.5:
+            grade = 'B'
+        elif score >= 6.0:
+            grade = 'C'
+        elif score >= 4.0:
+            grade = 'D'
+        else:
+            grade = 'F'
+
+        rationale = (
+            f"{severity_counts.get('CRITICAL', 0)} critical, "
+            f"{severity_counts.get('HIGH', 0)} high, "
+            f"{severity_counts.get('MEDIUM', 0)} medium, "
+            f"{severity_counts.get('LOW', 0)} low issues"
+        )
+        return score, grade, rationale
+
+    def _group_by_category(self, issues: List[SecurityIssue]) -> Dict[str, Dict]:
+        """Group issues by category with counts — answers 'systemic or one-off?'."""
+        grouped: Dict[str, Dict] = {}
+        for issue in issues:
+            cat = issue.category
+            if cat not in grouped:
+                grouped[cat] = {'count': 0, 'severities': {}, 'titles': set()}
+            grouped[cat]['count'] += 1
+            sev_map = grouped[cat]['severities']
+            sev_map[issue.severity] = sev_map.get(issue.severity, 0) + 1
+            grouped[cat]['titles'].add(issue.title)
+        for cat in grouped:
+            grouped[cat]['titles'] = sorted(grouped[cat]['titles'])
+        return grouped
 
 
 # Alias for backward compatibility
