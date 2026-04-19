@@ -19,6 +19,7 @@
     "idor": "Tests IDOR",
     "redteam": "Red Team",
     "passive": "Scan passif",
+    "advanced": "Avancé",
     "results": "Résultats",
     "acceptance": "Acceptation"
   },
@@ -72,5 +73,21 @@
     "ok": "OK",
     "cancel": "Annuler",
     "warning_upload_first": "Veuillez importer et analyser un fichier HAR en premier"
+  },
+  "advanced": {
+    "intro": "Attaques spécialisées par protocole : JWT, CORS, cache poisoning, HTTP smuggling, timing aveugle, GraphQL, WebSocket. Auparavant disponibles uniquement en CLI.",
+    "picker_label": "Type d'attaque",
+    "picker_help": "Choisir une attaque — chacune utilise le HAR actuellement importé en entrée",
+    "zap_on": "Client ZAP disponible — les attaques passent par le proxy ZAP quand c'est supporté",
+    "zap_off": "Pas de client ZAP — les attaques s'exécutent en HTTP direct (sans risque pour les tests en lecture)",
+    "run_btn": "Lancer l'attaque",
+    "running": "Exécution de {attack}…",
+    "failed": "Échec de l'attaque",
+    "m_verdict": "Verdict",
+    "m_total": "Tests effectués",
+    "m_vuln": "Vulnérables",
+    "endpoints_expander": "Endpoints détectés ({n})",
+    "findings_header": "Résultats",
+    "no_findings": "Aucun résultat — soit aucune cible ne correspond, soit tous les tests ont réussi"
   }
 }
