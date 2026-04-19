@@ -1,4 +1,24 @@
 #!/usr/bin/env python3
+"""
+Application Streamlit — interface interactive de HAR-ZAP.
+
+Rôle de ce fichier :
+- Orchestrer la navigation entre les 10 onglets du pentest (Upload → Advanced
+  → Results → Acceptance).
+- Conserver l'état de session (HAR chargé, scan en cours, FP marqués, langue,
+  workflow) via `st.session_state`.
+- Router tous les libellés utilisateur via `t()` pour qu'ils soient traduisibles
+  en/fr sans toucher au code.
+
+Principes de découplage :
+- Aucune logique d'attaque ici — chaque onglet appelle un module dédié
+  (`ZAPScanner`, `IDORDetector`, `run_advanced_attack`, …) et se contente de
+  rendre les résultats. Cela permet aux mêmes attaques d'être exposées par la
+  CLI et l'API REST sans dupliquer le code.
+- Les helpers de rendu complexe sont dans `modules/ui_*.py`
+  (ui_llm_plan, ui_advanced, ui_components) pour que l'app.py reste un
+  orchestrateur lisible, pas un mur de Streamlit.
+"""
 import json
 import tempfile
 
@@ -22,6 +42,15 @@ from modules.correlator import correlate_alerts, correlation_summary
 from modules.har_diff import diff_hars
 from modules.script_reports import collect_reports, summary as script_summary
 from modules.reporter import Reporter
+from modules.ui_llm_plan import render_plan as render_llm_plan, summarize as summarize_llm_plan
+from modules.fp_store import get_store as get_fp_store, fingerprint as fp_fingerprint
+from modules.scan_planner import plan_scan, format_plan
+from modules.ui_advanced import (
+    ADVANCED_ATTACKS,
+    ATTACK_LABELS,
+    run as run_advanced_attack,
+    verdict_color,
+)
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -52,7 +81,14 @@ if 'workflow' not in st.session_state:
 
 
 def render_language_selector():
-    """Render a language selector at the top of the sidebar."""
+    """Render a language selector at the top of the sidebar.
+
+    Subtilité Streamlit : le selectbox retourne la valeur au rendu courant,
+    mais `t()` (dans tous les autres onglets déjà rendus au-dessus) a déjà lu
+    `st.session_state.lang` avec l'ancienne valeur. Il faut donc un `st.rerun()`
+    quand l'utilisateur change de langue pour que toute la page soit
+    re-rendue avec la nouvelle locale — sinon seul le selectbox change.
+    """
     names = {lang: load_locale(lang).get("_meta", {}).get("name", lang) for lang in SUPPORTED_LANGS}
     current = st.session_state.get("lang", DEFAULT_LANG)
     labels = [f"{names[lang]}" for lang in SUPPORTED_LANGS]
@@ -108,6 +144,12 @@ def render_workflow_sidebar():
         st.sidebar.progress(done / total if total > 0 else 0)
 
         if st.sidebar.button(t("sidebar.reset_btn"), key="reset_btn"):
+            # Reset complet : on vide le fichier `.harzap_session.json`, puis
+            # on purge TOUT le session_state sauf `workflow` (qu'on recrée
+            # juste après). Sans cette boucle, des résidus (scan_results,
+            # har_data, FP non confirmés) resteraient en mémoire et fausseraient
+            # le scan suivant. L'ordre est critique : purger PUIS recréer,
+            # sinon on détruit immédiatement le nouveau workflow.
             WorkflowState.delete()
             for key in list(st.session_state.keys()):
                 if key != "workflow":
@@ -132,6 +174,7 @@ def main():
         f"🎯 {t('tabs.idor')}",
         f"🔴 {t('tabs.redteam')}",
         f"🔵 {t('tabs.passive')}",
+        f"🧪 {t('tabs.advanced')}",
         f"📊 {t('tabs.results')}",
         f"✅ {t('tabs.acceptance')}",
     ]
@@ -159,10 +202,67 @@ def main():
         render_passive_tab()
 
     with tabs[7]:
-        render_results_tab()
+        render_advanced_tab()
 
     with tabs[8]:
+        render_results_tab()
+
+    with tabs[9]:
         render_acceptance_tab()
+
+
+def _render_llm_plan_section(har_data: dict) -> None:
+    """Show the LLM attack plan (gated by button — LLM calls cost money/time).
+
+    Le bouton est *obligatoire* — on ne lance jamais un appel LLM
+    automatiquement au chargement du HAR : 1) ça coûte de l'argent à chaque
+    upload, 2) l'utilisateur peut tester sans clé API et s'en sortir grâce
+    au cache `LLMCache` qui réutilise le plan par empreinte HAR.
+    """
+    import os
+
+    has_key = any(
+        os.environ.get(k)
+        for k in ("HARZAP_ANTHROPIC_API_KEY", "HARZAP_GEMINI_API_KEY", "HARZAP_LLM_API_KEY")
+    )
+
+    st.markdown("---")
+    st.subheader("🤖 LLM attack plan")
+
+    if not has_key:
+        st.info(
+            "Set `HARZAP_GEMINI_API_KEY` or `HARZAP_ANTHROPIC_API_KEY` in `.env` to "
+            "let the LLM produce a prioritized attack plan from this HAR."
+        )
+        return
+
+    if "llm_plan" in st.session_state and st.session_state.get("llm_plan_har_hash"):
+        summary = summarize_llm_plan(st.session_state.llm_plan)
+        st.caption(
+            f"{summary['strategies']} strategies · "
+            f"{summary['prioritized_endpoints']} endpoints · "
+            f"{summary['regex_patterns']} regex patterns · "
+            f"{summary['business_flows']} flows"
+        )
+        render_llm_plan(st.session_state.llm_plan, key_prefix="upload_llm_plan")
+        if st.button("🔄 Re-run LLM analysis", key="llm_refresh_btn"):
+            st.session_state.pop("llm_plan", None)
+            st.session_state.pop("llm_plan_har_hash", None)
+            st.rerun()
+        return
+
+    if st.button("🚀 Generate attack plan with LLM", key="llm_generate_btn", type="primary"):
+        try:
+            from modules.llm.analyzer import LLMSecurityAnalyzer
+            with st.spinner("Calling LLM (one call, cached by HAR hash)..."):
+                analyzer = LLMSecurityAnalyzer.from_config({})
+                plan = analyzer.analyze(har_data)
+                st.session_state.llm_plan = plan
+                st.session_state.llm_plan_har_hash = plan.har_hash
+            st.success("✓ Plan ready")
+            st.rerun()
+        except Exception as e:
+            st.error(f"LLM analysis failed: {e}")
 
 
 def render_upload_tab():
@@ -217,6 +317,8 @@ def render_upload_tab():
                         urls.add(entry.get('request', {}).get('url', ''))
                     for url in list(urls)[:20]:
                         st.code(url, language=None)
+
+                _render_llm_plan_section(har_data)
 
             except Exception as e:
                 st.error(f"Error parsing HAR: {e}")
@@ -313,13 +415,71 @@ def render_zap_scan_tab():
             format_func=lambda i: f"{fuzzable_df.iloc[i]['Method']} {fuzzable_df.iloc[i]['URL'][:80]}"
         )
 
-        if st.button("🚀 Launch ZAP Scan", type="primary"):
+        dry_run = st.checkbox(
+            "🔍 Preview only (dry-run)",
+            value=False,
+            key="zap_dry_run",
+            help="Show what the scan would do (targets, policies, estimated volume/time) without sending any request.",
+        )
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            launch_clicked = st.button("🚀 Launch ZAP Scan", type="primary")
+        with col2:
+            preview_clicked = st.button("📋 Preview plan", key="zap_plan_btn")
+
+        if preview_clicked or (dry_run and launch_clicked):
+            _show_scan_plan(parsed_data, st.session_state.config)
+        elif launch_clicked:
             launch_zap_scan(parsed_data, selected_indices)
     else:
         st.info("No fuzzable URLs found in HAR file")
 
 
+def _show_scan_plan(parsed_data, config):
+    plan = plan_scan(parsed_data, config)
+    data = plan.to_dict()
+    summary = data['summary']
+    st.subheader("🔍 Dry-run plan")
+    cols = st.columns(4)
+    cols[0].metric("Targets", summary['target_count'])
+    cols[1].metric("Scripts", summary['script_count'])
+    cols[2].metric("Est. requests", plan.estimated_requests)
+    cols[3].metric("Est. duration", summary['estimated_duration_pretty'])
+
+    if plan.warnings:
+        for w in plan.warnings:
+            st.warning(w)
+
+    if plan.targets:
+        st.markdown("**Targets and policies**")
+        st.dataframe(plan.targets, use_container_width=True)
+
+    with st.expander("JS scripts that would load"):
+        if plan.scripts_to_load:
+            for s in plan.scripts_to_load:
+                st.code(s, language=None)
+        else:
+            st.caption("None")
+
+    with st.expander("Python attacks enabled"):
+        for a in plan.python_attacks:
+            st.markdown(f"- `{a}`")
+
+
 def launch_zap_scan(parsed_data, selected_indices):
+    """Lance un scan ZAP complet en propageant la progression vers la UI.
+
+    Séquence obligatoire : Docker → configure context → policies → site tree
+    → scripts JS → scan actif avec callback → collecte des outputs. Changer
+    l'ordre casse ZAP (ex. lancer un scan avant `populate_site_tree` donne
+    un spider à vide).
+
+    Les 3 `st.empty()` (progress_bar, current_target, live_metrics) sont
+    volontairement créés avant la boucle pour que le callback puisse les
+    mettre à jour sur place sans re-render complet. Streamlit n'a pas de
+    vrai thread UI — c'est cette astuce qui donne l'illusion du temps réel.
+    """
     config = st.session_state.config
 
     progress_container = st.container()
@@ -348,10 +508,44 @@ def launch_zap_scan(parsed_data, selected_indices):
             status_text.text("Executing scans...")
 
             progress_bar = st.progress(0)
+            current_target = st.empty()
+            live_metrics = st.empty()
 
-            scan_results = scanner.execute_targeted_scans()
+            def _progress_cb(event):
+                # Progression agrégée : barre de 0 à 1 basée sur « cibles
+                # terminées + fraction de la cible courante ». Sans ça, la
+                # barre resterait à 0 puis sauterait à 100 quand ZAP rend
+                # le contrôle — inutilisable sur un scan de 10 minutes.
+                # Toutes les erreurs du callback sont absorbées : un scan
+                # ne doit jamais crasher à cause d'un widget Streamlit.
+                idx = event.get('target_index') or 0
+                total = event.get('target_total') or 1
+                target_pct = (idx - 1) / total if total else 0
+                scan_pct = (event.get('scan_progress') or 0) / 100.0
+                overall = min(1.0, target_pct + (scan_pct / total if total else 0))
+                try:
+                    progress_bar.progress(overall)
+                    current_target.info(
+                        f"[{idx}/{total}] {event.get('type', '?')} · "
+                        f"{event.get('url', '')[:100]} · scan {event.get('scan_progress', 0)}%"
+                    )
+                    snap = scanner.get_scan_progress()
+                    if snap:
+                        live_metrics.caption(
+                            f"Passive queue: {snap.get('passive_records_to_scan', '?')} · "
+                            f"Alerts so far — "
+                            f"🔴{snap['alerts_by_risk'].get('High', 0)} "
+                            f"🟠{snap['alerts_by_risk'].get('Medium', 0)} "
+                            f"🟡{snap['alerts_by_risk'].get('Low', 0)}"
+                        )
+                except Exception:
+                    pass
+
+            scan_results = scanner.execute_targeted_scans(progress_callback=_progress_cb)
 
             progress_bar.progress(100)
+            current_target.empty()
+            live_metrics.empty()
             status_text.text("Collecting results...")
 
             alerts = scanner.get_alerts()
@@ -820,14 +1014,30 @@ def render_zap_results():
                     elif rep['raw_output']:
                         st.code(rep['raw_output'][:500], language=None)
 
-    risk_filter = st.selectbox("Filter by Risk", ["All", "High", "Medium", "Low"])
+    fp_store = get_fp_store()
+    annotated = fp_store.annotate_alerts(alerts)
 
-    filtered = alerts
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        risk_filter = st.selectbox("Filter by Risk", ["All", "High", "Medium", "Low"])
+    with col_b:
+        show_fp = st.checkbox("Show FPs", value=False, key="show_fp_toggle",
+                              help="Include alerts marked as false positives")
+
+    filtered = annotated
     if risk_filter != "All":
-        filtered = [a for a in alerts if a.get('risk') == risk_filter]
+        filtered = [a for a in filtered if a.get('risk') == risk_filter]
+    if not show_fp:
+        filtered = [a for a in filtered if not a.get('is_false_positive')]
+
+    fp_count = sum(1 for a in annotated if a.get('is_false_positive'))
+    if fp_count:
+        st.caption(f"🚫 {fp_count} alert(s) marked as false-positive and hidden. Toggle to see them.")
 
     for alert in filtered[:20]:
-        with st.expander(f"[{alert.get('risk')}] {alert.get('alert')}"):
+        is_fp = alert.get('is_false_positive', False)
+        tag = "🚫 FP " if is_fp else ""
+        with st.expander(f"{tag}[{alert.get('risk')}] {alert.get('alert')}"):
             correlation = alert.get('correlation') or {}
             st.write(f"**URL:** {alert.get('url')}")
             if correlation.get('har_entry_index') is not None:
@@ -845,6 +1055,24 @@ def render_zap_results():
             if curl:
                 st.markdown("**Reproduce:**")
                 st.code(curl, language="bash")
+
+            # La clé du bouton inclut le fingerprint pour que Streamlit les
+            # distingue dans la boucle (même libellé pour 20 alertes = collision
+            # de clés → erreur de rendu). Le `st.rerun()` est nécessaire pour
+            # que le filtre `is_false_positive` soit recalculé à la prochaine
+            # passe et que l'alerte bascule immédiatement de côté.
+            fp_btn_key = f"fp_btn_{alert.get('fingerprint')}"
+            if is_fp:
+                if st.button("♻️ Un-mark false positive", key=fp_btn_key):
+                    fp_store.unmark(alert.get('fingerprint'))
+                    st.rerun()
+            else:
+                reason_key = f"fp_reason_{alert.get('fingerprint')}"
+                reason = st.text_input("FP reason (optional)", key=reason_key,
+                                       placeholder="e.g. protected by WAF, intentional behaviour")
+                if st.button("🚫 Mark as false positive", key=fp_btn_key):
+                    fp_store.mark(alert, reason=reason)
+                    st.rerun()
 
     if st.button("🛑 Stop ZAP Container"):
         if st.session_state.docker_manager:
@@ -1115,6 +1343,101 @@ def render_preprocessing_tab():
 
                     except Exception as e:
                         st.error(f"Save failed: {e}")
+
+
+def render_advanced_tab():
+    """Expose the protocol-specialised attack modules (JWT/CORS/cache/smuggling/timing/GraphQL/WS).
+
+    Each attack takes only the HAR we already have — no extra form fields are
+    required beyond the explicit confirmation click.
+    """
+    st.header(f"🧪 {t('tabs.advanced')}")
+    st.caption(t("advanced.intro"))
+
+    har_data = st.session_state.get("har_data")
+    if not har_data:
+        st.warning(t("common.warning_upload_first"))
+        return
+
+    attack_key = st.selectbox(
+        t("advanced.picker_label"),
+        options=ADVANCED_ATTACKS,
+        format_func=lambda k: ATTACK_LABELS.get(k, k),
+        key="advanced_attack_pick",
+        help=t("advanced.picker_help"),
+    )
+
+    zap_client = None
+    scan_session = st.session_state.get("scan_results")
+    if scan_session and scan_session.get("scanner") is not None:
+        zap_client = scan_session["scanner"].zap
+
+    st.caption(
+        t("advanced.zap_on") if zap_client is not None else t("advanced.zap_off")
+    )
+
+    if st.button(
+        f"🚀 {t('advanced.run_btn')}",
+        key=f"advanced_run_{attack_key}",
+        type="primary",
+    ):
+        result = _run_advanced_attack_with_spinner(attack_key, har_data, zap_client)
+        if result is not None:
+            st.session_state.setdefault("advanced_results", {})[attack_key] = result
+            st.rerun()
+
+    cached = st.session_state.get("advanced_results", {}).get(attack_key)
+    if cached:
+        _render_advanced_result(cached)
+
+
+def _run_advanced_attack_with_spinner(attack_key: str, har_data: dict, zap_client) -> dict | None:
+    config = st.session_state.get("config") or {}
+    try:
+        with st.spinner(t("advanced.running", attack=ATTACK_LABELS.get(attack_key, attack_key))):
+            return run_advanced_attack(attack_key, har_data, config=config, zap_client=zap_client)
+    except Exception as e:
+        st.error(f"{t('advanced.failed')}: {e}")
+        import traceback
+        st.code(traceback.format_exc(), language=None)
+        return None
+
+
+def _render_advanced_result(result: dict) -> None:
+    verdict = result.get("verdict", "NO_TARGETS")
+    total = len(result.get("findings") or [])
+    vuln = sum(1 for r in (result.get("findings") or []) if r.get("vulnerable"))
+
+    cols = st.columns(3)
+    cols[0].metric(t("advanced.m_verdict"), verdict, delta_color=verdict_color(verdict))
+    cols[1].metric(t("advanced.m_total"), total)
+    cols[2].metric(t("advanced.m_vuln"), vuln)
+
+    st.caption(result.get("summary", ""))
+
+    endpoints = result.get("endpoints")
+    if endpoints:
+        with st.expander(t("advanced.endpoints_expander", n=len(endpoints))):
+            st.dataframe(endpoints, use_container_width=True)
+
+    findings = result.get("findings") or []
+    if not findings:
+        st.info(t("advanced.no_findings"))
+        return
+
+    st.markdown(f"### {t('advanced.findings_header')}")
+    for i, finding in enumerate(findings[:50]):
+        title = (
+            finding.get("alert")
+            or finding.get("attack_type")
+            or finding.get("vulnerability_type")
+            or finding.get("type")
+            or f"Finding #{i + 1}"
+        )
+        icon = "🚨" if finding.get("vulnerable") else "✅"
+        severity = finding.get("severity") or finding.get("risk") or ""
+        with st.expander(f"{icon} {title} · {severity}"):
+            st.json(finding)
 
 
 def render_acceptance_tab():

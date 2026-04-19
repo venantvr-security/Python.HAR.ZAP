@@ -42,7 +42,15 @@ class ScriptReport:
 
 
 def _parse_output(raw: Optional[str]) -> List[Dict[str, Any]]:
-    """Scripts may emit structured JSON lines or plain text — try JSON first."""
+    """Scripts may emit structured JSON lines or plain text — try JSON first.
+
+    Les scripts ZAP écrivent dans `scriptVars.output` via `print()` ou
+    `script.setScriptVar()`. Certains auteurs émettent du JSON ligne-par-ligne
+    (idéal pour l'UI structurée), d'autres du texte libre. On tente JSON
+    d'abord, on retombe en `{"message": line}` sinon — comme ça la boîte noire
+    devient au pire une liste de messages horodatables, jamais un mur de
+    texte opaque.
+    """
     if not raw:
         return []
     findings: List[Dict[str, Any]] = []

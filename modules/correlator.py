@@ -83,6 +83,10 @@ def correlate_alerts(alerts: Iterable[Dict[str, Any]], har_data: Dict[str, Any])
             out.append(CorrelatedAlert(alert=alert))
             continue
 
+        # Cascade de correspondance du plus strict au plus large. On s'arrête
+        # dès qu'un niveau matche — le résultat porte son propre niveau de
+        # confiance pour que l'UI puisse colorer le lien vers le HAR :
+        # exact > normalized (query string ignorée) > path > domain.
         for key, lookup, conf in (
             (url, "exact", "exact"),
             (_normalize(url), "normalized", "normalized"),

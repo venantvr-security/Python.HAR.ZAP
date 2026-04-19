@@ -210,14 +210,41 @@ class Reporter:
     def _risk_to_severity_score(risk: str) -> str:
         return {'High': '8.0', 'Medium': '5.0', 'Low': '2.0'}.get(risk, '0.0')
 
-    def save_html_report(self, zap_client=None, output_file: str = None) -> Optional[str]:
-        """Save HTML report (ZAP native or custom)."""
+    def save_html_report(
+        self,
+        zap_client=None,
+        output_file: str = None,
+        alerts: Optional[List[Dict]] = None,
+        scan_duration: Optional[str] = None,
+    ) -> Optional[str]:
+        """Save HTML report with an executive summary prepended to ZAP's native HTML.
+
+        If `alerts` is provided, an executive summary block (top findings + OWASP
+        score + immediate actions) is rendered at the top. When no zap_client is
+        available, a standalone summary-only HTML is still emitted so the
+        pentester always has a one-pager.
+        """
         if not output_file:
             output_file = str(self.output_dir / f"scan_report_{self.timestamp}.html")
+
+        summary_html = ""
+        if alerts is not None:
+            try:
+                exec_summary = self.generate_executive_summary(alerts, scan_duration=scan_duration)
+                summary_html = self._render_executive_summary_html(exec_summary)
+            except Exception as e:
+                logger.warning("exec_summary_failed", error=str(e))
 
         if zap_client:
             try:
                 html_report = zap_client.core.htmlreport()
+                if summary_html and "<body" in html_report:
+                    # Insert the exec summary right after <body>
+                    idx = html_report.find("<body")
+                    end_of_body_tag = html_report.find(">", idx) + 1
+                    html_report = html_report[:end_of_body_tag] + summary_html + html_report[end_of_body_tag:]
+                elif summary_html:
+                    html_report = summary_html + html_report
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(html_report)
                 logger.info("html_report_saved", path=output_file)
@@ -226,7 +253,65 @@ class Reporter:
             except Exception as e:
                 logger.error("html_report_error", error=str(e))
                 return None
+
+        if summary_html:
+            # Fallback: standalone exec summary when no ZAP client
+            standalone = f"<!doctype html><html><head><meta charset='utf-8'><title>HAR-ZAP Executive Summary</title></head><body>{summary_html}</body></html>"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(standalone)
+            logger.info("html_report_saved", path=output_file, summary_only=True)
+            return output_file
+
         return None
+
+    @staticmethod
+    def _render_executive_summary_html(exec_summary: Dict) -> str:
+        """Render the executive summary dict as an HTML block."""
+        risk_color = {
+            "CRITICAL": "#b71c1c",
+            "HIGH": "#e65100",
+            "MEDIUM": "#f9a825",
+            "LOW": "#2e7d32",
+        }.get(exec_summary.get("risk_level", ""), "#455a64")
+
+        top_issues = exec_summary.get("top_issues", []) or []
+        actions = exec_summary.get("immediate_actions", []) or []
+
+        top_html = "".join(
+            f"<li><strong>{issue.get('name', 'Unknown')}</strong> — {issue.get('count', 0)} occurrence(s)</li>"
+            for issue in top_issues[:3]
+        ) or "<li>No critical findings</li>"
+
+        actions_html = "".join(
+            f"<li>{action}</li>" for action in actions[:5]
+        ) or "<li>No immediate actions required</li>"
+
+        return f"""
+<section style="font-family:-apple-system,sans-serif;padding:24px;border:2px solid {risk_color};border-radius:8px;margin:16px;background:#fafafa;">
+  <h1 style="margin-top:0;color:{risk_color};">Executive Summary</h1>
+  <table style="width:100%;border-collapse:collapse;">
+    <tr>
+      <td style="padding:8px 16px 8px 0;"><strong>Risk level:</strong></td>
+      <td style="padding:8px 16px 8px 0;color:{risk_color};font-weight:bold;">{exec_summary.get('risk_level', 'UNKNOWN')}</td>
+      <td style="padding:8px 16px 8px 0;"><strong>Findings:</strong></td>
+      <td style="padding:8px 16px 8px 0;">{exec_summary.get('total_findings', 0)}
+        ({exec_summary.get('critical_findings', 0)} critical,
+        {exec_summary.get('high_findings', 0)} high)</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 16px 8px 0;"><strong>OWASP score:</strong></td>
+      <td style="padding:8px 16px 8px 0;">{exec_summary.get('owasp_score', 'N/A')} / 100
+        ({exec_summary.get('owasp_status', 'N/A')})</td>
+      <td style="padding:8px 16px 8px 0;"><strong>Duration:</strong></td>
+      <td style="padding:8px 16px 8px 0;">{exec_summary.get('duration') or '—'}</td>
+    </tr>
+  </table>
+  <h2 style="margin-top:24px;">Top 3 issues</h2>
+  <ol>{top_html}</ol>
+  <h2 style="margin-top:24px;">Immediate actions</h2>
+  <ol>{actions_html}</ol>
+</section>
+"""
 
     def save_critical_findings(self, alerts: List[Dict]) -> Optional[str]:
         """Save critical findings with cURL reproduction commands."""
@@ -394,8 +479,8 @@ class Reporter:
         if 'sarif' in formats:
             saved['sarif'] = self.save_sarif_report(alerts)
 
-        if 'html' in formats and zap_client:
-            result = self.save_html_report(zap_client)
+        if 'html' in formats:
+            result = self.save_html_report(zap_client, alerts=alerts)
             if result:
                 saved['html'] = result
 

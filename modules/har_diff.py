@@ -86,6 +86,17 @@ def _group_by_endpoint(har: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
 
 
 def _looks_like_id(segment: str) -> bool:
+    """Heuristique : ce segment de chemin ressemble-t-il à un identifiant ?
+
+    On capture les deux cas qui dominent en pratique pour l'IDOR :
+    - IDs séquentiels (`/users/42`, `/orders/12345`) — isdigit() suffit
+    - IDs opaques (UUID, nanoid, slug base64, token hex) — >= 16 caractères
+      alphanumériques + `-_` évite les faux positifs du type `/about` ou
+      `/profile` qui ne sont pas des IDs mais des noms de routes.
+
+    Le seuil à 16 est empirique : plus court ça attrape des mots comme
+    `settings`, plus long ça rate des nanoids de 12-15 caractères.
+    """
     if not segment:
         return False
     if segment.isdigit():

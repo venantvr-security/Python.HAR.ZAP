@@ -2,6 +2,20 @@
 """
 HAR-ZAP: Professional DAST Security Platform
 CI/CD-friendly CLI with fail-fast mode, incremental scanning, and multi-protocol support.
+
+Rôle de cette CLI vs l'application Streamlit :
+- Streamlit est l'interface interactive où le pentesteur explore les résultats.
+- Cette CLI est l'interface **pipeline** : elle retourne un code de sortie non-nul
+  quand les critères d'acceptation échouent (`--fail-fast`), elle produit des
+  rapports JSON/SARIF/JUnit lisibles par une CI, et elle peut s'exécuter en
+  mode `--dry-run` pour qu'un job CI prévisualise un scan avant de le lancer.
+
+Principe important : la CLI **ne partage pas d'état** avec Streamlit. Chaque
+invocation démarre son propre conteneur ZAP (sauf `--no-docker`), exécute le
+scan, génère les rapports, et s'arrête. Les fichiers de session
+(`.harzap_session.json`, `.harzap_false_positives.json`, `.harzap_webhooks.json`)
+sont toutefois partagés sur le disque — c'est volontaire pour que les FP
+marqués en Streamlit soient respectés par la CLI en CI.
 """
 import argparse
 import json
@@ -86,6 +100,8 @@ Examples:
     scan_parser.add_argument('--api-key', help='ZAP API key')
     scan_parser.add_argument('--webhook', help='Webhook type: slack, teams, discord')
     scan_parser.add_argument('--rate-limit', type=float, help='Requests per second')
+    scan_parser.add_argument('--dry-run', action='store_true',
+                             help='Print what would be scanned (targets, policies, volume, duration) and exit — no requests sent')
 
     # === GRAPHQL COMMAND ===
     gql_parser = subparsers.add_parser('graphql', help='GraphQL security testing')
@@ -237,7 +253,19 @@ def run_scan(args):
         print("Error: No URLs found in HAR", file=sys.stderr)
         return 1
 
-    # Delta analysis for incremental
+    # Le dry-run est **après** l'analyse du HAR : on a besoin des endpoints
+    # parsés pour estimer volume et durée. Sortie exit 0 sans toucher au
+    # réseau — utile dans une CI pour afficher « ce qui aurait été scanné »
+    # sur chaque PR avant de l'autoriser.
+    if getattr(args, 'dry_run', False):
+        from modules.scan_planner import plan_scan, format_plan
+        plan = plan_scan(har_data, config)
+        print(format_plan(plan))
+        return 0
+
+    # Mode incrémental : on saute les requêtes déjà scannées dans un run
+    # précédent (hash URL+méthode stocké dans `.harzap_cache/`). Gagne du
+    # temps en CI quand seul un sous-ensemble du trafic a changé.
     if incremental:
         delta = incremental.get_delta_requests({'entries': har_data.get('entries', [])})
         print(f"Incremental: {delta['stats']['new']} new, {delta['stats']['cached']} cached")
@@ -368,6 +396,10 @@ def run_scan(args):
         return 1
 
     finally:
+        # `finally` critique : si le scan plante (OOM, KeyboardInterrupt, bug
+        # ZAP…) on ne doit PAS laisser un conteneur Docker orphelin en arrière-
+        # plan. Une CI qui rejoue 10 fois de suite pourrait sinon saturer la
+        # machine avec des conteneurs fantômes écoutant sur le port 8080.
         if docker_manager:
             docker_manager.stop_zap()
 
@@ -672,7 +704,18 @@ def run_advanced(args):
 
 
 def run_diagnose(args):
-    """Run full diagnostic attack suite."""
+    """Run full diagnostic attack suite.
+
+    Orchestre en une seule commande : ZAP scan + red-team Python + modules
+    avancés (JWT/CORS/cache/smuggling/timing) + reporting. Conçu pour une
+    exécution de bout-en-bout en audit formel — l'équivalent CLI de « cocher
+    tout et lancer ».
+
+    Différent de `run_scan` : `scan` est ciblé (juste ZAP + quelques options),
+    `diagnose` passe par toutes les couches d'attaque et consomme donc bien
+    plus de requêtes et de temps. À utiliser avec précaution sur un environ-
+    nement partagé ; préférer `--dry-run` d'abord.
+    """
     import time
     start_time = time.time()
 
@@ -900,7 +943,16 @@ def generate_diagnostic_html(report):
 
 
 def build_criteria(args):
-    """Build acceptance criteria from CLI args."""
+    """Build acceptance criteria from CLI args.
+
+    Ces critères alimentent `AcceptanceEngine` qui, en mode `--fail-fast`,
+    décide du code de sortie du process : 0 si tous passent, 1 sinon. C'est
+    le mécanisme qui permet à une CI de bloquer un merge dès que l'outil
+    trouve trop d'alertes.
+
+    Convention pentest : `--max-high 0 --fail-fast` pour un périmètre prod
+    (aucune High tolérée), `--max-high 2 --max-medium 10` pour du développement.
+    """
     criteria = []
 
     if args.max_high is not None:

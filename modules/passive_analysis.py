@@ -416,6 +416,11 @@ class PassiveAnalysisOrchestrator:
           - MEDIUM:   -0.5 each (capped at -3)
           - LOW:      -0.1 each (capped at -1)
         """
+        # Chaque palier de sévérité est plafonné pour éviter qu'une erreur
+        # systémique (ex: « CSP manquant » remonté 50 fois, une par page) ne
+        # fasse tomber le score à 0. L'idée n'est pas de punir la répétition —
+        # 50 pages sans CSP = 1 vrai finding — mais de refléter la posture
+        # globale. Sans plafond, un site pas si mal sécurisé finirait avec un F.
         critical_penalty = min(severity_counts.get('CRITICAL', 0) * 2.0, 6.0)
         high_penalty = min(severity_counts.get('HIGH', 0) * 1.0, 4.0)
         medium_penalty = min(severity_counts.get('MEDIUM', 0) * 0.5, 3.0)
