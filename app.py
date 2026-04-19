@@ -1086,47 +1086,88 @@ def render_idor_results():
     results = st.session_state.idor_results
     detector = st.session_state.idor_detector
 
-    vulnerable = [r for r in results if r.status == IDORStatus.VULNERABLE]
+    # Filtre explicite par statut — l'ancien rendu ne montrait que VULNERABLE,
+    # ce qui cache les SAFE/INCONCLUSIVE que le pentesteur peut vouloir auditer
+    # manuellement (faux négatifs potentiels).
+    status_options = ["VULNERABLE", "INCONCLUSIVE", "SAFE", "All"]
+    status_filter = st.selectbox(
+        "Filter by status", status_options, index=0, key="idor_status_filter",
+        help="Show only results with this IDOR verdict",
+    )
 
-    if vulnerable:
-        st.error(f"🚨 Found {len(vulnerable)} IDOR vulnerabilities!")
-
-        for result in vulnerable:
-            with st.expander(f"IDOR: {result.url} (Confidence: {result.confidence:.0%})"):
-                st.write(f"**Method:** {result.method}")
-                st.write(f"**Status:** {result.status.value}")
-                st.json(result.proof)
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.write("**Baseline Response (User A)**")
-                    if result.baseline_response:
-                        st.json({
-                            'status': result.baseline_response.get('status_code'),
-                            'length': result.baseline_response.get('content_length')
-                        })
-
-                with col2:
-                    st.write("**Test Response (User B → Resource A)**")
-                    if result.test_response:
-                        st.json({
-                            'status': result.test_response.get('status_code'),
-                            'length': result.test_response.get('content_length')
-                        })
-
-                if result.diff_html:
-                    st.write("**Visual Diff:**")
-                    # noinspection PyUnresolvedReferences
-                    st.components.v1.html(result.diff_html, height=600, scrolling=True)
-
-                curl_cmd = detector.generate_curl_commands(
-                    result,
-                    detector.extract_auth_tokens(detector.session_b)
-                )
-                st.code(curl_cmd, language='bash')
+    if status_filter == "All":
+        filtered = results
     else:
-        st.success("✅ No IDOR vulnerabilities detected")
+        filtered = [r for r in results if r.status.value == status_filter]
+
+    vuln_count = sum(1 for r in results if r.status == IDORStatus.VULNERABLE)
+    cols = st.columns(4)
+    cols[0].metric("Total", len(results))
+    cols[1].metric("🚨 Vulnerable", vuln_count)
+    cols[2].metric("🟡 Inconclusive", sum(1 for r in results if r.status.value == "INCONCLUSIVE"))
+    cols[3].metric("✅ Safe", sum(1 for r in results if r.status.value == "SAFE"))
+
+    # Export CSV — une ligne par résultat, prêt à ouvrir dans Excel / pivot SOC.
+    import io, csv
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["url", "method", "status", "confidence", "baseline_status", "test_status"])
+    for r in results:
+        w.writerow([
+            r.url, r.method, r.status.value, f"{r.confidence:.2f}",
+            (r.baseline_response or {}).get("status_code", ""),
+            (r.test_response or {}).get("status_code", ""),
+        ])
+    st.download_button(
+        "📥 Export CSV",
+        data=buf.getvalue(),
+        file_name="idor_results.csv",
+        mime="text/csv",
+        key="idor_csv",
+    )
+
+    if vuln_count:
+        st.error(f"🚨 Found {vuln_count} IDOR vulnerabilities!")
+
+    if not filtered:
+        st.info(f"No IDOR results with status `{status_filter}`")
+        return
+
+    for result in filtered:
+        icon = {"VULNERABLE": "🚨", "INCONCLUSIVE": "🟡", "SAFE": "✅"}.get(result.status.value, "·")
+        with st.expander(f"{icon} {result.status.value} — {result.url} (conf {result.confidence:.0%})"):
+            st.write(f"**Method:** {result.method}")
+            st.write(f"**Status:** {result.status.value}")
+            st.json(result.proof)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write("**Baseline Response (User A)**")
+                if result.baseline_response:
+                    st.json({
+                        'status': result.baseline_response.get('status_code'),
+                        'length': result.baseline_response.get('content_length')
+                    })
+
+            with col2:
+                st.write("**Test Response (User B → Resource A)**")
+                if result.test_response:
+                    st.json({
+                        'status': result.test_response.get('status_code'),
+                        'length': result.test_response.get('content_length')
+                    })
+
+            if result.diff_html:
+                st.write("**Visual Diff:**")
+                # noinspection PyUnresolvedReferences
+                st.components.v1.html(result.diff_html, height=600, scrolling=True)
+
+            curl_cmd = detector.generate_curl_commands(
+                result,
+                detector.extract_auth_tokens(detector.session_b)
+            )
+            st.code(curl_cmd, language='bash')
 
 
 def render_preprocessing_tab():

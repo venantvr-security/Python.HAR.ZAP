@@ -623,9 +623,24 @@ class RaceConditionTester:
             vulnerability_indicators.append("Majority of requests succeeded")
             confidence += 0.3
 
+        # Delta observable chiffré pour le rapport : dans une race condition
+        # l'attendu est « 1 requête réussie, N-1 rejetées ». L'observé est
+        # `success_count`. Le delta rend le finding exploitable côté rapport
+        # client (« le serveur a accepté 10 applications d'un même code promo
+        # là où il n'aurait dû en accepter qu'une »).
+        expected_success = 1
+        delta_count = max(0, success_count - expected_success)
+        delta_summary = (
+            f"{success_count} requêtes réussies sur {len(responses)} envoyées — "
+            f"attendu : {expected_success} · excès : {delta_count}"
+        )
+
         return {
             'total_requests': len(responses),
             'success_count': success_count,
+            'expected_success': expected_success,
+            'delta_count': delta_count,
+            'delta_summary': delta_summary,
             'errors': len(errors),
             'unique_lengths': len(unique_lengths),
             'length_variance': length_variance,

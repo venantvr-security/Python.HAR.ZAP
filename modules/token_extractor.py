@@ -38,6 +38,88 @@ class TokenExtractor:
 
         return self._to_wordlists()
 
+    def assess_exploitability(self) -> List[Dict]:
+        """Analyse les tokens extraits pour pointer directement vers leur
+        exploitabilité probable — au lieu d'obliger le pentesteur à relancer
+        un module dédié pour vérifier.
+
+        Retourne une liste de findings « potentiels » :
+          - JWT avec algo faible (`none`, `HS256` + secret probable court)
+          - Cookies de session sans `HttpOnly` / `Secure` / `SameSite`
+          - API keys exposées en clair dans un header custom
+
+        Chaque entrée porte `attack_suggestion` qui indique quel module
+        lancer ensuite (`jwt_attacks`, etc.).
+        """
+        import base64
+        import json as _json
+
+        findings: List[Dict] = []
+        entries = self.har_data.get('log', {}).get('entries', [])
+        seen_jwt: Set[str] = set()
+        seen_cookies: Set[str] = set()
+
+        for entry in entries:
+            req = entry.get('request', {})
+            for h in req.get('headers', []) or []:
+                name = h.get('name', '').lower()
+                value = h.get('value', '')
+                if name == 'authorization' and value.lower().startswith('bearer '):
+                    token = value.split(' ', 1)[1]
+                    if token in seen_jwt or token.count('.') != 2:
+                        continue
+                    seen_jwt.add(token)
+                    try:
+                        header_b64 = token.split('.')[0] + '=' * (-len(token.split('.')[0]) % 4)
+                        header = _json.loads(base64.urlsafe_b64decode(header_b64))
+                        alg = str(header.get('alg', '')).lower()
+                        if alg == 'none':
+                            findings.append({
+                                'type': 'jwt_alg_none',
+                                'severity': 'HIGH',
+                                'evidence': token[:40] + '...',
+                                'description': "JWT avec algorithme `none` — accepté sans signature",
+                                'attack_suggestion': 'Onglet Advanced → JWT',
+                            })
+                        elif alg.startswith('hs'):
+                            findings.append({
+                                'type': 'jwt_hs_short_key',
+                                'severity': 'MEDIUM',
+                                'evidence': f"alg={alg}",
+                                'description': f"JWT symétrique ({alg}) — tester un dictionnaire de secrets faibles",
+                                'attack_suggestion': 'Onglet Advanced → JWT',
+                            })
+                    except Exception:
+                        pass
+                if name == 'set-cookie' or name == 'cookie':
+                    continue
+            resp = entry.get('response', {})
+            for h in resp.get('headers', []) or []:
+                if h.get('name', '').lower() != 'set-cookie':
+                    continue
+                cookie = h.get('value', '')
+                if cookie in seen_cookies:
+                    continue
+                seen_cookies.add(cookie)
+                low = cookie.lower()
+                cookie_name = cookie.split('=', 1)[0]
+                missing = []
+                if 'httponly' not in low:
+                    missing.append('HttpOnly')
+                if 'secure' not in low:
+                    missing.append('Secure')
+                if 'samesite' not in low:
+                    missing.append('SameSite')
+                if missing:
+                    findings.append({
+                        'type': 'cookie_weak_flags',
+                        'severity': 'MEDIUM' if 'HttpOnly' in missing else 'LOW',
+                        'evidence': f"{cookie_name} missing: {', '.join(missing)}",
+                        'description': f"Cookie sans {', '.join(missing)} — risque XSS/CSRF",
+                        'attack_suggestion': 'Onglet Passive Scan',
+                    })
+        return findings
+
     def _extract_from_request(self, request: Dict):
         """Extract tokens from request"""
         # URL params

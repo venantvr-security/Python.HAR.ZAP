@@ -52,7 +52,11 @@ class GraphQLVulnerability:
     endpoint: str
     severity: str
     description: str
-    evidence: Optional[str] = None
+    # `evidence` accepte str ou dict : certains findings (ex. introspection
+    # activée) ont besoin de transporter une liste de types exposés, pas
+    # juste une chaîne d'évidence. La sérialisation (CSV, rapport HTML,
+    # bundle zip) gère les deux formes.
+    evidence: Any = None
     remediation: Optional[str] = None
 
 
@@ -135,15 +139,49 @@ class GraphQLScanner:
                     endpoint.schema = data['data']['__schema']
                     self._extract_operations(endpoint)
 
+                    # On récupère les types exposés par l'introspection et on
+                    # flag les noms sensibles (User, Admin*, Internal*, Payment,
+                    # Session, Token, Credential...). Un pentesteur qui voit
+                    # « introspection=true » a besoin de savoir *quels* types
+                    # sont exposés pour prioriser — c'est ça qui rend la
+                    # finding actionnable, pas juste le booléen.
+                    types = data['data']['__schema'].get('types', []) or []
+                    all_type_names = sorted({
+                        t.get('name') for t in types
+                        if t.get('name') and not t.get('name', '').startswith('__')
+                    })
+                    sensitive_pat = (
+                        'user', 'admin', 'internal', 'payment', 'session',
+                        'token', 'credential', 'secret', 'password', 'billing',
+                    )
+                    sensitive_types = [
+                        n for n in all_type_names
+                        if any(p in n.lower() for p in sensitive_pat)
+                    ]
+
                     self.vulnerabilities.append(GraphQLVulnerability(
                         type='INTROSPECTION_ENABLED',
                         endpoint=endpoint.url,
-                        severity='Medium',
-                        description='GraphQL introspection is enabled',
-                        remediation='Disable introspection in production'
+                        severity='High' if sensitive_types else 'Medium',
+                        description=(
+                            f"GraphQL introspection is enabled — "
+                            f"{len(all_type_names)} types exposed, "
+                            f"{len(sensitive_types)} sensitive "
+                            f"(e.g. {', '.join(sensitive_types[:5])})"
+                            if sensitive_types
+                            else f"GraphQL introspection is enabled — {len(all_type_names)} types exposed"
+                        ),
+                        remediation='Disable introspection in production',
+                        evidence={
+                            'exposed_types': all_type_names[:100],
+                            'sensitive_types': sensitive_types,
+                            'total_types': len(all_type_names),
+                        },
                     ))
 
-                    logger.info("introspection_success", url=endpoint.url[:50])
+                    logger.info("introspection_success", url=endpoint.url[:50],
+                                 total_types=len(all_type_names),
+                                 sensitive=len(sensitive_types))
                     return endpoint.schema
 
         except Exception as e:

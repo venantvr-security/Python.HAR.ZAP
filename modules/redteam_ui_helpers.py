@@ -121,9 +121,40 @@ def render_redteam_results():
                 st.write(f"**Confidence:** {result.confidence:.0%}")
                 st.write(f"**Description:** {result.description}")
                 st.write(f"**Remediation:** {result.remediation}")
+                # Bouton « rejouer manuellement » — le curl reproductible
+                # construit à partir de l'évidence permet au pentesteur de
+                # relancer le test en dehors de l'outil (Burp, Insomnia, CLI)
+                # pour confirmer et documenter la vulnérabilité.
+                curl = _build_replay_curl(result)
+                if curl:
+                    st.markdown("**Reproduce manually:**")
+                    st.code(curl, language="bash")
                 st.divider()
         else:
             st.success("✅ No vulnerabilities found")
+
+
+def _build_replay_curl(result) -> str:
+    """Build a best-effort curl to replay a red-team finding.
+
+    Les modules red-team ne stockent pas systématiquement un payload curl
+    pré-construit ; on le reconstruit depuis l'évidence quand on peut.
+    """
+    evidence = result.evidence if isinstance(result.evidence, dict) else {}
+    method = (evidence.get("method") or "GET").upper()
+    url = result.url
+    parts = ["curl"]
+    if method != "GET":
+        parts.append(f"-X {method}")
+    for name, value in (evidence.get("headers") or {}).items():
+        safe = str(value).replace("'", "'\\''")
+        parts.append(f"-H '{name}: {safe}'")
+    body = evidence.get("body") or evidence.get("payload")
+    if method in {"POST", "PUT", "PATCH"} and body:
+        safe = str(body).replace("'", "'\\''")
+        parts.append(f"--data-raw '{safe}'")
+    parts.append(f"'{url}'")
+    return " ".join(parts)
 
 
 def render_passive_results():

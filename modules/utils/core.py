@@ -193,26 +193,44 @@ class DualFormatter(logging.Formatter):
 
 
 class StructuredLogger(logging.Logger):
-    """Logger with structured field support."""
+    """Logger with structured field support.
+
+    `logging.setLoggerClass(StructuredLogger)` dans `get_logger()` remplace
+    la classe globale, donc httpx / starlette / requests héritent aussi de
+    cette classe. Ces libs appellent `logger.info("HTTP %s %s", method, url)`
+    avec des args positionnels à la mode stdlib — on doit donc *aussi* accepter
+    ce style, sinon n'importe quel test qui passe par httpx explose. On sert
+    deux dialectes : kwargs = notre mode structuré ; args = passe-plat stdlib.
+    """
 
     def _log_with_fields(self, level: int, msg: str, **kwargs):
         record = self.makeRecord(self.name, level, "", 0, msg, (), None)
         record.extra_fields = kwargs
         self.handle(record)
 
-    def debug(self, msg: str, **kwargs):
+    def debug(self, msg, *args, **kwargs):
+        if args:
+            return super().debug(msg, *args, **kwargs)
         self._log_with_fields(logging.DEBUG, msg, **kwargs)
 
-    def info(self, msg: str, **kwargs):
+    def info(self, msg, *args, **kwargs):
+        if args:
+            return super().info(msg, *args, **kwargs)
         self._log_with_fields(logging.INFO, msg, **kwargs)
 
-    def warning(self, msg: str, **kwargs):
+    def warning(self, msg, *args, **kwargs):
+        if args:
+            return super().warning(msg, *args, **kwargs)
         self._log_with_fields(logging.WARNING, msg, **kwargs)
 
-    def error(self, msg: str, **kwargs):
+    def error(self, msg, *args, **kwargs):
+        if args:
+            return super().error(msg, *args, **kwargs)
         self._log_with_fields(logging.ERROR, msg, **kwargs)
 
-    def critical(self, msg: str, **kwargs):
+    def critical(self, msg, *args, **kwargs):
+        if args:
+            return super().critical(msg, *args, **kwargs)
         self._log_with_fields(logging.CRITICAL, msg, **kwargs)
 
 

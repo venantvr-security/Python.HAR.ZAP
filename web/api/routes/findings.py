@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+import csv
+import io
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -46,6 +49,41 @@ async def list_findings(
 async def findings_summary():
     """Counts grouped by source and severity — useful for dashboards."""
     return get_findings_store().summary()
+
+
+@router.get(".csv")
+async def export_csv(
+    source: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    include_false_positives: bool = Query(False),
+):
+    """Export all findings as CSV — one row per finding with the essentials.
+
+    Ideal for SOC pivot tables: the full `raw` payload stays in the JSON
+    endpoint, here we give the columns that fit a spreadsheet.
+    """
+    items = get_findings_store().list_all(
+        source=source, severity=severity,
+        include_false_positives=include_false_positives,
+    )
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "fingerprint", "source", "attack_type", "severity",
+        "url", "method", "description", "is_false_positive", "created_at",
+    ])
+    for f in items:
+        w.writerow([
+            f.get("fingerprint", ""), f.get("source", ""), f.get("attack_type", ""),
+            f.get("severity", ""), f.get("url", ""), f.get("method", ""),
+            (f.get("description") or "").replace("\n", " ")[:200],
+            f.get("is_false_positive", False), f.get("created_at", ""),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="findings.csv"'},
+    )
 
 
 @router.get("/{fingerprint}")

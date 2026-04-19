@@ -258,7 +258,39 @@ class FindingsStore:
             "false_positives": fp_count,
             "by_source": by_source,
             "by_severity": by_severity,
+            "grouped_by_type": self.group_by_type(),
         }
+
+    def group_by_type(self) -> Dict[str, Dict[str, Any]]:
+        """Regroupe les findings par `attack_type` pour détecter le systémique.
+
+        Exemple concret : 10 alertes « Missing CSP » sur 10 pages d'un même
+        site = 1 seul vrai défaut systémique. Sans ce regroupement, le
+        rapport remonte 10 items et noie le signal. On expose count +
+        severities + urls uniques + un flag `systemic` quand le même type
+        touche plus de 3 URLs distinctes.
+        """
+        items = self.list_all(include_false_positives=False)
+        groups: Dict[str, Dict[str, Any]] = {}
+        for f in items:
+            key = f"{f['source']}:{f['attack_type']}"
+            slot = groups.setdefault(key, {
+                'attack_type': f['attack_type'],
+                'source': f['source'],
+                'count': 0,
+                'severities': {},
+                'urls': set(),
+                'fingerprints': [],
+            })
+            slot['count'] += 1
+            slot['severities'][f['severity']] = slot['severities'].get(f['severity'], 0) + 1
+            if f.get('url'):
+                slot['urls'].add(f['url'])
+            slot['fingerprints'].append(f['fingerprint'])
+        for key, slot in groups.items():
+            slot['urls'] = sorted(slot['urls'])
+            slot['systemic'] = len(slot['urls']) > 3
+        return groups
 
     @staticmethod
     def _with_fp_flag(finding: Dict[str, Any]) -> Dict[str, Any]:
