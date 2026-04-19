@@ -255,32 +255,105 @@ class ZAPScanner:
             'discovered_urls': discovered_urls
         }
 
-    def execute_targeted_scans(self) -> List[Dict]:
-        """Execute targeted active scans on fuzzable URLs and API endpoints."""
+    def execute_targeted_scans(self, progress_callback=None) -> List[Dict]:
+        """Execute targeted active scans on fuzzable URLs and API endpoints.
+
+        Optional `progress_callback` receives a dict on every meaningful tick:
+        {'phase': 'scanning' | 'target_done',
+         'target_index': int, 'target_total': int,
+         'url': str, 'type': 'fuzzable' | 'api',
+         'scan_progress': int (0-100) | None}
+        It lets the caller stream progress into a UI without changing the return
+        contract of this method.
+        """
         scan_results = []
+        fuzzable = []
+        apis = []
 
         if self.scan_config.get('scan_fuzzable_urls', True):
             fuzzable = self.har_data.get('fuzzable_urls', [])[:self.max_fuzzable]
             logger.info("scanning_fuzzable_urls", count=len(fuzzable))
 
-            for target in fuzzable:
-                result = self._scan_single_target(target, target_type='fuzzable')
-                if result:
-                    scan_results.append(result)
-
         if self.scan_config.get('scan_api_endpoints', True):
             apis = self.har_data.get('api_endpoints', [])[:self.max_api_endpoints]
             logger.info("scanning_api_endpoints", count=len(apis))
 
-            for api in apis:
-                result = self._scan_single_target(api, target_type='api')
-                if result:
-                    scan_results.append(result)
+        total = len(fuzzable) + len(apis)
+
+        def _emit(event: Dict) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(event)
+            except Exception as e:
+                logger.debug("progress_callback_error", error=str(e))
+
+        for i, target in enumerate(fuzzable):
+            _emit({
+                'phase': 'scanning',
+                'target_index': i + 1, 'target_total': total,
+                'url': target.get('url', ''), 'type': 'fuzzable',
+                'scan_progress': 0,
+            })
+            result = self._scan_single_target(
+                target, target_type='fuzzable', progress_callback=progress_callback,
+                target_index=i + 1, target_total=total,
+            )
+            if result:
+                scan_results.append(result)
+            _emit({'phase': 'target_done', 'target_index': i + 1, 'target_total': total,
+                   'url': target.get('url', ''), 'type': 'fuzzable', 'scan_progress': 100})
+
+        for j, api in enumerate(apis):
+            idx = len(fuzzable) + j + 1
+            _emit({
+                'phase': 'scanning',
+                'target_index': idx, 'target_total': total,
+                'url': api.get('url', ''), 'type': 'api', 'scan_progress': 0,
+            })
+            result = self._scan_single_target(
+                api, target_type='api', progress_callback=progress_callback,
+                target_index=idx, target_total=total,
+            )
+            if result:
+                scan_results.append(result)
+            _emit({'phase': 'target_done', 'target_index': idx, 'target_total': total,
+                   'url': api.get('url', ''), 'type': 'api', 'scan_progress': 100})
 
         return scan_results
 
+    def get_scan_progress(self) -> Dict:
+        """Live snapshot of ZAP state — safe to poll from a UI loop.
+
+        Returns a dict with passive queue, spider sites, alert counts by risk.
+        Never raises: any ZAP hiccup yields an empty dict entry.
+        """
+        snapshot: Dict = {
+            'passive_records_to_scan': None,
+            'alerts_by_risk': {'High': 0, 'Medium': 0, 'Low': 0, 'Informational': 0},
+            'sites': [],
+        }
+        try:
+            snapshot['passive_records_to_scan'] = int(self.zap.pscan.records_to_scan)
+        except Exception:
+            pass
+        try:
+            for alert in self.zap.core.alerts() or []:
+                risk = alert.get('risk', 'Informational')
+                snapshot['alerts_by_risk'][risk] = snapshot['alerts_by_risk'].get(risk, 0) + 1
+        except Exception:
+            pass
+        try:
+            snapshot['sites'] = list(self.zap.core.sites or [])[:20]
+        except Exception:
+            pass
+        return snapshot
+
     @retry_zap_call(max_retries=2)
-    def _scan_single_target(self, target: Dict, target_type: str = 'generic') -> Optional[Dict]:
+    def _scan_single_target(self, target: Dict, target_type: str = 'generic',
+                            progress_callback=None,
+                            target_index: Optional[int] = None,
+                            target_total: Optional[int] = None) -> Optional[Dict]:
         """Scan a single target with appropriate policy."""
         url = target.get('url', '')
         params = target.get('params', [])
@@ -298,7 +371,11 @@ class ZAPScanner:
                 scanpolicyname=policy
             )
 
-            self._wait_for_scan(scan_id, url)
+            self._wait_for_scan(
+                scan_id, url,
+                progress_callback=progress_callback,
+                target_index=target_index, target_total=target_total,
+            )
 
             return {
                 'url': url,
@@ -325,8 +402,11 @@ class ZAPScanner:
             return 'Path-Traversal'
         return 'Default Policy'
 
-    def _wait_for_scan(self, scan_id: str, url: str):
-        """Wait for scan completion with timeout."""
+    def _wait_for_scan(self, scan_id: str, url: str,
+                       progress_callback=None,
+                       target_index: Optional[int] = None,
+                       target_total: Optional[int] = None):
+        """Wait for scan completion with timeout, emitting progress."""
         start_time = time.time()
         last_progress = -1
 
@@ -335,8 +415,20 @@ class ZAPScanner:
                 self.rate_limiter.acquire()
                 status = int(self.zap.ascan.status(scan_id))
 
-                if status != last_progress and status % 20 == 0:
-                    logger.debug("scan_progress", url=url[:30], progress=f"{status}%")
+                if status != last_progress:
+                    if progress_callback is not None:
+                        try:
+                            progress_callback({
+                                'phase': 'scanning',
+                                'target_index': target_index,
+                                'target_total': target_total,
+                                'url': url,
+                                'scan_progress': status,
+                            })
+                        except Exception:
+                            pass
+                    if status % 20 == 0:
+                        logger.debug("scan_progress", url=url[:30], progress=f"{status}%")
                     last_progress = status
 
                 if status >= 100:
