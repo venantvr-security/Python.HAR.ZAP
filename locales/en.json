@@ -12,6 +12,7 @@
     "help": "Switch between English and French for the app UI. Docs stay in English."
   },
   "tabs": {
+    "guide": "Guide",
     "upload": "Upload & Configure",
     "preprocess": "HAR Preprocessing",
     "zap_scan": "ZAP Scan",

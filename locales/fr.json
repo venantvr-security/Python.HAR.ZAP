@@ -12,6 +12,7 @@
     "help": "Basculer entre français et anglais pour l'interface. La documentation reste en anglais."
   },
   "tabs": {
+    "guide": "Guide",
     "upload": "Import & Configuration",
     "preprocess": "Prétraitement HAR",
     "zap_scan": "Scan ZAP",

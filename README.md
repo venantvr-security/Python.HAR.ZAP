@@ -2,6 +2,8 @@
 
 Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP orchestration, Red Team offensive testing, IDOR detection, and CI/CD integration.
 
+> **Start here**: [QUICKSTART](QUICKSTART.md) — 5 min · [PENTEST walkthrough](PENTEST.md) — full scenario · [INNOVATION](docs/INNOVATION.md) — what's different · [HOWTO recipes](docs/HOWTO.md) · [Full docs index](docs/README.md)
+
 ## Branches
 
 | Branch | Description |

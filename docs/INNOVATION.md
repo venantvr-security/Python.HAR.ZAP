@@ -1,5 +1,7 @@
 # En quoi HAR-ZAP est innovant
 
+[← Index docs](README.md) · [PENTEST walkthrough](../PENTEST.md) · [Architecture](ARCHITECTURE.md) · [HOWTO](HOWTO.md)
+
 L'innovation de HAR-ZAP ne tient pas aux briques individuelles — ZAP, LLMs, scanners JWT/CORS/GraphQL/WebSocket existent ailleurs. Elle tient à **la chaîne qui va du HAR capturé au rapport exploitable avec interprétation assistée**, et à quelques choix de conception qu'aucun DAST grand public ne fait nativement.
 
 ---

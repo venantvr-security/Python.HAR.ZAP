@@ -1,5 +1,7 @@
 # LLM Security Integration Roadmap
 
+[← Docs index](README.md) · [INNOVATION](INNOVATION.md) · [PENTEST walkthrough](../PENTEST.md)
+
 ## Status: Implemented
 
 Branch: `llm`

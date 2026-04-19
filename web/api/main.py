@@ -3,15 +3,17 @@ FastAPI Backend for HAR-ZAP
 
 Provides REST API, WebSocket endpoints, and web interface for ZAP control.
 """
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import markdown
 
 from .routes import zap, scans, config, docs, tor, har, attacks, enrich, llm, findings, webhooks
@@ -74,6 +76,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Optional API key auth — activé uniquement si HARZAP_API_KEY est défini
+# dans l'environnement. En local (dev), pas de clé → pas d'auth, comportement
+# inchangé. En prod, on protège les routes /api/v1/* qui mutent l'état (findings
+# FP marking, webhooks subscription, etc.) sans casser les pages HTML.
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Vérifie l'entête `X-API-Key` sur /api/v1/* quand HARZAP_API_KEY est défini.
+
+    Pourquoi un middleware plutôt qu'une dep FastAPI :
+    - Couvre d'un coup tous les routers /api/v1 sans toucher chaque route.
+    - Exonère l'UI HTML et /static pour ne pas casser le navigateur.
+    - Bypass propre quand aucune clé n'est configurée → zéro friction en dev.
+    """
+
+    async def dispatch(self, request, call_next):
+        expected = os.environ.get("HARZAP_API_KEY")
+        if expected and request.url.path.startswith("/api/v1/"):
+            provided = request.headers.get("X-API-Key", "")
+            if provided != expected:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Missing or invalid X-API-Key header"},
+                )
+        return await call_next(request)
+
+
+app.add_middleware(APIKeyMiddleware)
 
 # API routers
 app.include_router(zap.router, prefix="/api/v1/zap", tags=["ZAP"])

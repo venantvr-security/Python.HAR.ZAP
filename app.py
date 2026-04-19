@@ -51,6 +51,7 @@ from modules.ui_advanced import (
     run as run_advanced_attack,
     verdict_color,
 )
+from modules.ui_guide import render_guide_tab
 
 st.set_page_config(
     page_title="DAST Security Platform",
@@ -167,6 +168,7 @@ def main():
     render_workflow_sidebar()
 
     tab_labels = [
+        f"📚 {t('tabs.guide')}",
         f"📤 {t('tabs.upload')}",
         f"🔧 {t('tabs.preprocess')}",
         f"🔍 {t('tabs.zap_scan')}",
@@ -181,34 +183,117 @@ def main():
     tabs = st.tabs(tab_labels)
 
     with tabs[0]:
-        render_upload_tab()
+        render_guide_tab()
 
     with tabs[1]:
-        render_preprocessing_tab()
+        render_upload_tab()
 
     with tabs[2]:
-        render_zap_scan_tab()
+        render_preprocessing_tab()
 
     with tabs[3]:
-        render_fuzzer_tab()
+        render_zap_scan_tab()
 
     with tabs[4]:
-        render_idor_tab()
+        render_fuzzer_tab()
 
     with tabs[5]:
-        render_redteam_tab()
+        render_idor_tab()
 
     with tabs[6]:
-        render_passive_tab()
+        render_redteam_tab()
 
     with tabs[7]:
-        render_advanced_tab()
+        render_passive_tab()
 
     with tabs[8]:
-        render_results_tab()
+        render_advanced_tab()
 
     with tabs[9]:
+        render_results_tab()
+
+    with tabs[10]:
         render_acceptance_tab()
+
+    # Pied de page : liens de navigation vers la doc. Les liens pointent
+    # vers les fichiers MD du repo — l'onglet Guide les rend in-app, mais
+    # on garde ces ancres pour copier-coller dans un ticket / une PR.
+    st.markdown("---")
+    st.caption(
+        "📚 Docs : [README](README.md) · [QUICKSTART](QUICKSTART.md) · "
+        "[PENTEST walkthrough](PENTEST.md) · [HOWTO](docs/HOWTO.md) · "
+        "[INNOVATION](docs/INNOVATION.md) · [Docs index](docs/README.md)"
+    )
+
+
+def _render_endpoint_ranking(parsed_data: dict) -> None:
+    """Classe les endpoints par risque heuristique pour prioriser le scan.
+
+    Heuristique didactique (documentée exprès pour que le pentesteur puisse
+    l'ajuster) :
+      +3  méthode mutante (POST/PUT/PATCH/DELETE)
+      +2  paramètre qui ressemble à un ID (`id`, `user_id`, `file`, `path`)
+      +2  endpoint API (chemin `/api/`, `/v1/`, `/graphql`)
+      +1  par paramètre fuzzable supplémentaire
+      +1  chemin contenant un segment numérique (candidat IDOR)
+    Score maximum ~= 8. Pas de statistique profonde — juste un tri qui aide
+    le pentesteur à savoir où regarder d'abord.
+    """
+    import re
+    rows = []
+    def _score(item):
+        url = item.get("url", "")
+        method = (item.get("method") or "GET").upper()
+        params = item.get("params") or []
+        score = 0
+        reasons = []
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            score += 3
+            reasons.append(f"method={method}")
+        if any(p.lower() in {"id", "user_id", "userid", "file", "path", "filename"} for p in params):
+            score += 2
+            reasons.append("id/path param")
+        if any(s in url.lower() for s in ("/api/", "/v1/", "/v2/", "/graphql")):
+            score += 2
+            reasons.append("api path")
+        score += min(len(params), 3)
+        if re.search(r"/\d+(?:/|$)", url):
+            score += 1
+            reasons.append("numeric segment")
+        return score, ", ".join(reasons) or "-"
+
+    for item in (parsed_data.get("fuzzable_urls") or []):
+        s, why = _score(item)
+        rows.append({
+            "score": s,
+            "method": item.get("method", "GET"),
+            "url": item.get("url", "")[:120],
+            "params": ", ".join((item.get("params") or [])[:5]),
+            "reasons": why,
+            "type": "fuzzable",
+        })
+    for item in (parsed_data.get("api_endpoints") or []):
+        s, why = _score(item)
+        rows.append({
+            "score": s + 1,  # bonus typage api
+            "method": item.get("method", "GET"),
+            "url": item.get("url", "")[:120],
+            "params": ", ".join((item.get("params") or [])[:5]),
+            "reasons": why + (", api_endpoint" if why != "-" else "api_endpoint"),
+            "type": "api",
+        })
+
+    if not rows:
+        return
+
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    with st.expander(f"🎯 Endpoints prioritaires ({len(rows)}, triés par score heuristique)"):
+        st.caption(
+            "Score = méthode (+3 mutant), params ID (+2), chemin API (+2), "
+            "nb de params (+1..3), segment numérique (+1). "
+            "C'est un tri, pas une vérité absolue — à ajuster selon contexte."
+        )
+        st.dataframe(rows[:30], use_container_width=True)
 
 
 def _render_llm_plan_section(har_data: dict) -> None:
@@ -384,6 +469,7 @@ def render_upload_tab():
                         'fuzzable_urls': len(parsed_data['fuzzable_urls']),
                         'domains': list(parsed_data['domains'])
                     })
+                    _render_endpoint_ranking(parsed_data)
 
 
 def render_zap_scan_tab():

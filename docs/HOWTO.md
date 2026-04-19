@@ -1,5 +1,7 @@
 # HOWTO: Diagnostic Security Testing
 
+[← Docs index](README.md) · [QUICKSTART](../QUICKSTART.md) · [PENTEST walkthrough](../PENTEST.md) · [CLI reference](api/CLI.md)
+
 ## Prerequisites
 
 ```bash

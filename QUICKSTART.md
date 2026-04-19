@@ -1,5 +1,7 @@
 # HAR.ZAP - Guide de démarrage rapide
 
+[← README](README.md) · [Docs index](docs/README.md) · [PENTEST walkthrough](PENTEST.md) · [HOWTO](docs/HOWTO.md)
+
 ## Prérequis
 
 - Python 3.8+
@@ -112,6 +114,10 @@ pip install python-owasp-zap-v2.4
 
 ## Prochaines étapes
 
-- Lire [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) pour comprendre le pipeline
-- Lire [docs/HUNTING_GUIDE.md](docs/HUNTING_GUIDE.md) pour la recherche de vulnérabilités
-- Lire [scripts/ARCHITECTURE.md](scripts/ARCHITECTURE.md) pour les scripts ZAP
+- [docs/HOWTO.md](docs/HOWTO.md) — recettes pas-à-pas pour les cas courants
+- [PENTEST.md](PENTEST.md) — scénario de pentest complet de bout en bout
+- [docs/INNOVATION.md](docs/INNOVATION.md) — ce qui distingue HAR-ZAP de ZAP/Burp/Arachni
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — comprendre le pipeline
+- [docs/HUNTING_GUIDE.md](docs/HUNTING_GUIDE.md) — recherche de vulnérabilités
+- [docs/README.md](docs/README.md) — index complet de la documentation
+- [scripts/ARCHITECTURE.md](scripts/ARCHITECTURE.md) — architecture des scripts ZAP
