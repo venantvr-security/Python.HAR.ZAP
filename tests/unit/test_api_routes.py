@@ -181,7 +181,11 @@ class TestAttackRoutes:
         assert 'Strategy disabled' in response.json()['detail']
 
     @patch('web.api.routes.attacks.run_attack_module')
-    async def test_run_attack_legacy(self, mock_run, client, mock_zap_service):
+    def test_run_attack_legacy(self, mock_run, client, mock_zap_service):
+        # Le handler `async` combiné à pytest sans plugin asyncio ne passait
+        # jamais dans le code — le test restait vert par erreur. Version
+        # synchrone : on parle à `client` qui fait l'appel HTTP, pas besoin
+        # d'await.
         mock_zap_service.is_running = False
         mock_run.return_value = {'findings': [], 'summary': {}}
 

@@ -187,6 +187,11 @@ def emit(
         # (DNS, timeout, connexion refusée) sont capturées et tracées dans le
         # rapport de livraison plutôt que propagées à l'appelant : un webhook
         # en panne ne doit pas casser le pentest en cours.
+        #
+        # Erreurs 4xx : pas de retry — une signature rejetée ou un payload
+        # mal formé ne sera pas mieux accepté à la seconde tentative. On
+        # économise des appels inutiles sur des receveurs qui renvoient 401
+        # tant que la clé n'est pas corrigée côté config.
         for attempt in range(max_retries):
             report["attempts"] = attempt + 1
             try:
@@ -195,6 +200,8 @@ def emit(
                 if 200 <= status < 300:
                     break
                 report["error"] = f"http {status}"
+                if 400 <= status < 500:
+                    break
             except Exception as e:     # noqa: BLE001
                 report["error"] = str(e)
             time.sleep(0.5 * (2 ** attempt))

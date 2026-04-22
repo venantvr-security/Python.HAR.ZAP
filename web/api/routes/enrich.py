@@ -86,9 +86,18 @@ async def extract_patterns(request: Request, req: ExtractRequest = None):
 
 @router.get("/zap-lists")
 async def list_zap_payloads(request: Request):
-    """List available ZAP payload categories."""
+    """List available ZAP payload categories.
+
+    Exige que ZAP tourne : les « listes » du ZAP sont chargées depuis le
+    conteneur, pas depuis le disque. Renvoyer un 200 avec `zap_connected=false`
+    invitait le pentesteur à scripter une dépendance muette — mieux vaut un
+    400 explicite qu'il puisse gérer.
+    """
     zap_service = request.app.state.shared['zap_service']
     config = request.app.state.shared['config'] or {}
+
+    if not zap_service or not zap_service.is_running:
+        raise HTTPException(status_code=400, detail="ZAP not running")
 
     try:
         import sys
@@ -97,12 +106,11 @@ async def list_zap_payloads(request: Request):
 
         from modules.zap_enricher import ZAPPayloadEnricher
 
-        zap = zap_service.zap if zap_service and zap_service.is_running else None
-        enricher = ZAPPayloadEnricher(zap=zap, config=config)
+        enricher = ZAPPayloadEnricher(zap=zap_service.zap, config=config)
         lists = enricher.get_available_lists()
 
         return {
-            "zap_connected": zap is not None,
+            "zap_connected": True,
             "categories": lists
         }
 
@@ -112,9 +120,18 @@ async def list_zap_payloads(request: Request):
 
 @router.post("/preview")
 async def preview_payloads(request: Request, req: PreviewRequest):
-    """Preview enriched payloads without fuzzing."""
+    """Preview enriched payloads without fuzzing.
+
+    Exige un HAR chargé côté `har_service` : sans HAR pas de patterns à
+    enrichir — le service retournerait une preview silencieusement vide et
+    induirait l'utilisateur en erreur. 400 explicite.
+    """
     config = request.app.state.shared['config'] or {}
     zap_service = request.app.state.shared['zap_service']
+    har_service = request.app.state.shared.get('har_service')
+
+    if not har_service or not getattr(har_service, 'current_har', None):
+        raise HTTPException(status_code=400, detail="No HAR loaded")
 
     try:
         import sys

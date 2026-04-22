@@ -1052,8 +1052,14 @@ def render_results_tab():
 def render_zap_results():
     st.subheader("ZAP Scan Results")
 
-    results = st.session_state.scan_results
-    alerts = results['alerts']
+    # Garde défensive : `scan_results` peut exister mais sans clé `alerts`
+    # si le scan a planté entre `start_zap()` et la collecte. On préfère
+    # un message explicite à un KeyError opaque qui blanchit tout l'onglet.
+    results = st.session_state.scan_results or {}
+    alerts = results.get('alerts')
+    if alerts is None:
+        st.warning("Scan results incomplete (no alerts collected). Relaunch the scan.")
+        return
 
     high = [a for a in alerts if a.get('risk') == 'High']
     medium = [a for a in alerts if a.get('risk') == 'Medium']
@@ -1169,8 +1175,14 @@ def render_zap_results():
 def render_idor_results():
     st.subheader("🎯 IDOR Test Results")
 
-    results = st.session_state.idor_results
-    detector = st.session_state.idor_detector
+    # Même logique défensive : `render_results_tab` guard l'entrée mais on
+    # pourrait être appelé hors-contexte (ex. tests). Vérifier la présence
+    # du detector évite un AttributeError sur `st.session_state.idor_detector`.
+    results = st.session_state.get("idor_results") or []
+    detector = st.session_state.get("idor_detector")
+    if not results or detector is None:
+        st.info("No IDOR detection has been run yet.")
+        return
 
     # Filtre explicite par statut — l'ancien rendu ne montrait que VULNERABLE,
     # ce qui cache les SAFE/INCONCLUSIVE que le pentesteur peut vouloir auditer
