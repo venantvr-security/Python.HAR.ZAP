@@ -72,6 +72,21 @@ class HARPreprocessor:
         Main processing pipeline
         Single pass through HAR, extract everything
         """
+        # Réinitialisation de l'état accumulé : process() est appelé par save(),
+        # save_extracts() et print_summary(). Sans ce reset, enchaîner deux de ces
+        # méthodes doublerait les données (append cumulatif) et muterait
+        # rétroactivement le résultat précédent, passé par référence.
+        self.endpoints = []
+        self.querystrings = defaultdict(list)
+        self.payloads = defaultdict(list)
+        self.dictionaries = {
+            'keys': {},
+            'values': defaultdict(set),
+            'parameters': defaultdict(set),
+            'headers': defaultdict(set),
+            'cookies': defaultdict(set)
+        }
+
         entries = self.har_data.get('log', {}).get('entries', [])
 
         print(f"[HARPreprocessor] Processing {len(entries)} entries...")
@@ -201,7 +216,7 @@ class HARPreprocessor:
         if not parsed.query:
             return
 
-        params = parse_qs(parsed.query)
+        params = parse_qs(parsed.query, keep_blank_values=True)
 
         for param_name, values in params.items():
             for value in values:
@@ -254,7 +269,7 @@ class HARPreprocessor:
         parsed = urlparse(url)
 
         if parsed.query:
-            params = parse_qs(parsed.query)
+            params = parse_qs(parsed.query, keep_blank_values=True)
             for param, values in params.items():
                 self.dictionaries['parameters'][param].update(values)
 

@@ -242,7 +242,15 @@ class ZAPScanner:
 
         logger.debug("spider_started", scan_id=scan_id)
 
+        # Garde temporelle : sans borne, un spider bloqué à un statut < 100
+        # (cible hors scope, scan gelé côté ZAP) ferait boucler indéfiniment ce
+        # pipeline synchrone. max_duration est en minutes ; on ajoute une marge.
+        deadline = time.time() + max_duration * 60 + 30
         while int(self.zap.spider.status(scan_id)) < 100:
+            if time.time() > deadline:
+                logger.warning("spider_timeout", scan_id=scan_id,
+                               progress=f"{self.zap.spider.status(scan_id)}%")
+                break
             progress = self.zap.spider.status(scan_id)
             logger.debug("spider_progress", progress=f"{progress}%")
             time.sleep(2)

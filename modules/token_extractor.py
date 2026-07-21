@@ -134,7 +134,7 @@ class TokenExtractor:
             self.tokens['paths'].add(part)
 
         # Query parameters
-        params = parse_qs(parsed.query)
+        params = parse_qs(parsed.query, keep_blank_values=True)
         for param, values in params.items():
             self.tokens['params'].add(param)
             for value in values:
@@ -202,8 +202,16 @@ class TokenExtractor:
         # Store param->value mapping
         self.tokens['values'][param].add(value)
 
-        # IDs
-        if 'id' in param_lower or self._is_id(value):
+        # IDs — match précis sur le NOM de paramètre. `'id' in param_lower`
+        # attrapait width, hidden, valid, provider, candidate… et polluait la
+        # wordlist d'IDs (utilisée pour l'IDOR) avec des valeurs non-identifiantes.
+        is_id_param = (
+            param_lower == 'id'
+            or param_lower in ('uid', 'guid', 'uuid', 'pid', 'oid')
+            or param_lower.endswith('_id')
+            or param.endswith('Id') or param.endswith('ID')
+        )
+        if is_id_param or self._is_id(value):
             self.tokens['ids'].add(value)
 
         # Emails

@@ -59,7 +59,11 @@ class WebSocketScanner:
         logger.info("detecting_websocket_endpoints")
         detected = {}
 
-        for entry in self.har_data.get('entries', []):
+        # Un HAR réel expose les entrées sous log.entries (convention du projet) ;
+        # on tolère aussi un dict déjà déballé {'entries': [...]}. Lire directement
+        # ['entries'] sur un vrai HAR renvoyait toujours [] → 0 endpoint détecté.
+        entries = self.har_data.get('log', {}).get('entries') or self.har_data.get('entries', [])
+        for entry in entries:
             request = entry.get('request', {})
             url = request.get('url', '')
             headers = {h['name'].lower(): h['value'] for h in request.get('headers', [])}

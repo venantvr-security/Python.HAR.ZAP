@@ -58,9 +58,9 @@ class ZAPFuzzer:
             for future in as_completed(futures):
                 endpoint = futures[future]
                 try:
-                    result = future.result()
-                    if result:
-                        results.append(result)
+                    endpoint_results = future.result()
+                    if endpoint_results:
+                        results.extend(endpoint_results)
                 except Exception as e:
                     logger.error("idor_fuzz_error", url=endpoint.get('url', '')[:30], error=str(e))
 
@@ -68,15 +68,21 @@ class ZAPFuzzer:
         return results
 
     @retry_zap_call(max_retries=2)
-    def _fuzz_idor_endpoint(self, endpoint: Dict, id_wordlist: List[str]) -> Optional[Dict]:
-        """Fuzz single endpoint for IDOR vulnerabilities."""
+    def _fuzz_idor_endpoint(self, endpoint: Dict, id_wordlist: List[str]) -> List[Dict]:
+        """Fuzz single endpoint for IDOR vulnerabilities.
+
+        Retourne un résultat PAR paramètre d'ID. Le vrai vecteur IDOR n'est pas
+        forcément le premier paramètre (ex. `doc_id` après `user_id`) : abandonner
+        après le premier param laissait des vulnérabilités non testées.
+        """
         url = endpoint['url']
         params = endpoint.get('params', [])
         id_params = [p for p in params if 'id' in p.lower()]
 
         if not id_params:
-            return None
+            return []
 
+        endpoint_results = []
         for param in id_params:
             self.rate_limiter.acquire()
 
@@ -110,16 +116,16 @@ class ZAPFuzzer:
                 requests=len(payloads)
             )
 
-            return {
+            endpoint_results.append({
                 'url': url,
                 'param': param,
                 'fuzzer_id': fuzzer_id,
                 'total_requests': len(payloads),
                 'vulnerable': vulnerable,
                 'results': fuzzer_results
-            }
+            })
 
-        return None
+        return endpoint_results
 
     def fuzz_authentication(self, endpoints: List[Dict]) -> List[Dict]:
         """Fuzz authentication endpoints with extracted usernames."""
@@ -133,15 +139,20 @@ class ZAPFuzzer:
         logger.info("auth_fuzzing_start", endpoints=len(endpoints), usernames=len(usernames))
 
         for endpoint in endpoints:
-            result = self._fuzz_auth_endpoint(endpoint, usernames)
-            if result:
-                results.append(result)
+            endpoint_results = self._fuzz_auth_endpoint(endpoint, usernames)
+            if endpoint_results:
+                results.extend(endpoint_results)
 
         return results
 
     @retry_zap_call(max_retries=2)
-    def _fuzz_auth_endpoint(self, endpoint: Dict, usernames: List[str]) -> Optional[Dict]:
-        """Fuzz single auth endpoint."""
+    def _fuzz_auth_endpoint(self, endpoint: Dict, usernames: List[str]) -> List[Dict]:
+        """Fuzz single auth endpoint.
+
+        Retourne un résultat PAR paramètre d'authentification (un endpoint peut
+        exposer plusieurs champs : `username`, `email`…). Abandonner après le
+        premier laissait les autres champs non fuzzés.
+        """
         url = endpoint['url']
         params = endpoint.get('params', [])
 
@@ -151,8 +162,9 @@ class ZAPFuzzer:
         ]
 
         if not auth_params:
-            return None
+            return []
 
+        endpoint_results = []
         for param in auth_params:
             self.rate_limiter.acquire()
 
@@ -174,14 +186,14 @@ class ZAPFuzzer:
 
             logger.debug("auth_endpoint_result", url=url[:30], param=param)
 
-            return {
+            endpoint_results.append({
                 'url': url,
                 'param': param,
                 'fuzzer_id': fuzzer_id,
                 'results': fuzzer_results
-            }
+            })
 
-        return None
+        return endpoint_results
 
     @retry_zap_call(max_retries=2)
     def fuzz_custom_params(self, url: str, param: str, wordlist_name: str) -> Dict:

@@ -94,7 +94,10 @@ class ZAPHttpClient:
             else:
                 body = str(data)
 
-            request_lines.append(f"Content-Length: {len(body)}")
+            # Content-Length en OCTETS (pas en caractères) : un corps accentué
+            # ("montant=déjà payé") compte plus d'octets que de caractères en
+            # UTF-8. Annoncer len(body) tronquerait le corps côté serveur.
+            request_lines.append(f"Content-Length: {len(body.encode('utf-8'))}")
 
         # Build full request
         request_lines.append('')  # Empty line before body
@@ -311,7 +314,10 @@ class ZAPHttpClient:
             if base_url:
                 kwargs['baseurl'] = base_url
             if risk:
-                kwargs['riskid'] = risk
+                # L'API ZAP attend un riskid entier (0-3), pas le libellé texte.
+                # Passer 'High' renvoyait un filtre incohérent / vide.
+                risk_map = {'Informational': '0', 'Low': '1', 'Medium': '2', 'High': '3'}
+                kwargs['riskid'] = risk_map.get(risk, risk)
             return self.zap.core.alerts(**kwargs)
         except Exception:
             return []

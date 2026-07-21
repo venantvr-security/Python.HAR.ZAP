@@ -61,7 +61,10 @@ class PayloadReconstructor:
         current = obj
 
         for key in keys[:-1]:
-            if key not in current:
+            # On force un dict si le segment intermédiaire n'en est pas un : sinon
+            # un chemin qui chevauche un champ scalaire existant ({"user":"bob"} +
+            # "user.id") faisait `"bob"["id"] = ...` → TypeError.
+            if not isinstance(current.get(key), dict):
                 current[key] = {}
             current = current[key]
 
@@ -185,20 +188,22 @@ class PayloadReconstructor:
                         'description': f'String to bool on {key}'
                     })
 
+                # Bool AVANT int : en Python bool est sous-classe d'int, donc
+                # tester int en premier interceptait tous les booléens et rendait
+                # cette branche morte (le vecteur bool→int n'était jamais généré).
+                elif isinstance(value, bool):
+                    payloads.append({
+                        'payload': {**deepcopy(base_payload), key: int(value)},
+                        'attack': f'type_juggling_{key}_bool_to_int',
+                        'description': f'Bool to int on {key}'
+                    })
+
                 # Int to string
                 elif isinstance(value, int):
                     payloads.append({
                         'payload': {**deepcopy(base_payload), key: str(value)},
                         'attack': f'type_juggling_{key}_int_to_str',
                         'description': f'Int to string on {key}'
-                    })
-
-                # Bool to int/string
-                elif isinstance(value, bool):
-                    payloads.append({
-                        'payload': {**deepcopy(base_payload), key: int(value)},
-                        'attack': f'type_juggling_{key}_bool_to_int',
-                        'description': f'Bool to int on {key}'
                     })
 
         return payloads

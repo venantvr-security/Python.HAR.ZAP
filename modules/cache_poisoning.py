@@ -6,6 +6,7 @@ Reference: https://portswigger.net/web-security/web-cache-poisoning
 All requests routed through ZAP for unified logging and alerting.
 """
 import hashlib
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -151,8 +152,13 @@ class CachePoisoningTester:
             )
 
     def _generate_cache_buster(self) -> str:
-        """Generate unique cache buster value"""
-        return hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+        """Generate unique cache buster value.
+
+        Basé sur secrets (aléatoire cryptographique) et non sur time.time() :
+        deux appels rapprochés doivent renvoyer des valeurs DISTINCTES, sinon le
+        cache-buster de l'URL et le marqueur de détection pourraient coïncider.
+        """
+        return secrets.token_hex(4)
 
     def identify_cacheable_endpoints(self) -> List[Dict]:
         """Find endpoints that appear to use caching"""
@@ -188,12 +194,18 @@ class CachePoisoningTester:
     def test_header_reflection(self, url: str, header_name: str,
                                header_template: str) -> Optional[CachePoisonResult]:
         """Test if header value is reflected in response"""
+        # Deux jetons DISTINCTS : `rand` est le marqueur injecté via l'en-tête,
+        # `cache_buster` sert uniquement à varier la clé de cache dans l'URL.
+        # Les confondre créait un faux positif dès que l'appli reflète sa query
+        # string (lien canonique, og:url…), car le buster apparaissait alors dans
+        # la réponse sans qu'aucun en-tête non-clé n'ait été reflété.
         rand = self._generate_cache_buster()
+        cache_buster = self._generate_cache_buster()
         header_value = header_template.replace('{rand}', rand)
 
         # Add cache buster to URL
         separator = '&' if '?' in url else '?'
-        test_url = f"{url}{separator}cb={rand}"
+        test_url = f"{url}{separator}cb={cache_buster}"
 
         # Request 1: With poison header
         response1 = self._get(test_url, headers={header_name: header_value})

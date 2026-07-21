@@ -318,14 +318,20 @@ class TokenEntropyAnalyzer:
             entropy = self.calculate_entropy(token)
             length = len(token)
 
-            is_weak = entropy < 4.0 or length < 16
+            # Entropie TOTALE en bits (par-symbole × longueur), pas par symbole :
+            # comparer l'entropie par symbole à 4.0 flaggait à tort tout token hex
+            # (max log2(16)=4.0, biaisé plus bas sur échantillon fini). Un token de
+            # 32 hex = ~128 bits est solide. Seuil de faiblesse : < 64 bits.
+            total_bits = entropy * length
+            is_weak = total_bits < 64 or length < 16
 
             if is_weak:
                 issues.append(SecurityIssue(
-                    severity='HIGH' if entropy < 3.0 else 'MEDIUM',
+                    severity='HIGH' if total_bits < 48 else 'MEDIUM',
                     category='Weak Token',
                     title=f'Weak {token_info["type"]}',
-                    description=f'Token has low entropy ({entropy:.2f} bits) and may be predictable',
+                    description=f'Token has low total entropy ({total_bits:.1f} bits, '
+                                f'{entropy:.2f}/char) and may be predictable',
                     evidence={
                         'type': token_info['type'],
                         'length': length,

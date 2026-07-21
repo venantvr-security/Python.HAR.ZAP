@@ -112,8 +112,13 @@ class LLMSecurityAnalyzer:
         # Parse response
         plan = self._parse_response(response, context)
 
-        # Cache result
-        self.cache.set(context.har_hash, plan)
+        # Ne PAS mettre en cache un plan issu d'un échec de parsing : sinon un
+        # plan vide serait servi depuis le cache pendant tout le TTL (24 h) sans
+        # jamais réessayer, l'erreur étant avalée silencieusement.
+        if 'error' not in plan.metadata:
+            self.cache.set(context.har_hash, plan)
+        else:
+            logger.warning("plan_not_cached_due_to_parse_error", har_hash=context.har_hash)
 
         logger.info(
             "analysis_complete",

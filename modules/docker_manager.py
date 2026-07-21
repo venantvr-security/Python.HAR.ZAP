@@ -39,7 +39,17 @@ class DockerZAPManager:
         )
 
         print(f"[Docker] Container started: {self.container.short_id}")
-        self._wait_for_zap()
+
+        # Nettoyage indépendant de l'appelant : si ZAP ne répond pas dans le
+        # délai, `_wait_for_zap` lève TimeoutError. Sans ce try/except, le
+        # conteneur déjà démarré resterait orphelin (aucune référence pour
+        # l'arrêter) — chaque échec de lancement en empilerait un de plus.
+        # Concerne surtout le chemin app.py, qui n'a pas de `finally: stop_zap()`.
+        try:
+            self._wait_for_zap()
+        except Exception:
+            self.stop_zap()
+            raise
 
         return {
             'container_id': self.container.id,

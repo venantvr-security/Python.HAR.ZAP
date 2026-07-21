@@ -154,7 +154,7 @@ class HARAnalyzer:
         url = request.get('url', '')
         parsed = urlparse(url)
 
-        query_params = parse_qs(parsed.query)
+        query_params = parse_qs(parsed.query, keep_blank_values=True)
         for param in query_params.keys():
             if self._is_suspicious_param(param):
                 fuzzable.append(param)
@@ -170,7 +170,7 @@ class HARAnalyzer:
                             if self._is_suspicious_param(key):
                                 fuzzable.append(f"body.{key}")
                 except Exception:  # Broad exception for robustness
-                    params = parse_qs(text)
+                    params = parse_qs(text, keep_blank_values=True)
                     for param in params.keys():
                         if self._is_suspicious_param(param):
                             fuzzable.append(f"form.{param}")

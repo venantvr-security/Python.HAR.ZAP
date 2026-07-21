@@ -310,29 +310,54 @@ class MassAssignmentFuzzer:
             if response is None:
                 continue
 
-            is_vulnerable = (
+            body_lower = response['text'].lower()
+            accepted = (
                     response['status_code'] in [200, 201, 204]
-                    and 'error' not in response['text'].lower()
-                    and 'invalid' not in response['text'].lower()
+                    and 'error' not in body_lower
+                    and 'invalid' not in body_lower
             )
 
-            if is_vulnerable:
-                result = AttackResult(
-                    attack_type=AttackType.MASS_ASSIGNMENT,
-                    url=url,
-                    method=method,
-                    vulnerable=True,
-                    confidence=0.7,
-                    evidence={
-                        'injected_params': dangerous_payload,
-                        'status_code': response['status_code'],
-                        'response_preview': response['text'][:500]
-                    },
-                    description=f"Endpoint accepted privilege escalation parameter: {dangerous_payload}",
-                    remediation="Use allowlist/DTO pattern for input validation"
-                )
-                results.append(result)
-                self._raise_alert(result)
+            if not accepted:
+                continue
+
+            # Confirmation : un simple 2xx ne prouve PAS que le champ de privilège
+            # a été appliqué (un endpoint peut ignorer silencieusement le champ et
+            # répondre 204). On ne parle de vuln à forte confiance que si la valeur
+            # injectée est réellement reflétée par le serveur. Sinon, on rapporte à
+            # confiance basse avec une mention explicite « à confirmer ».
+            reflected = any(
+                str(v).lower() in body_lower
+                for v in dangerous_payload.values()
+                if isinstance(v, (str, int)) and not isinstance(v, bool) and str(v)
+            )
+
+            if reflected:
+                confidence = 0.85
+                description = (f"Endpoint reflected injected privilege parameter "
+                               f"(value echoed in response): {dangerous_payload}")
+            else:
+                confidence = 0.4
+                description = (f"Endpoint accepted privilege parameter (HTTP "
+                               f"{response['status_code']}) but effect NOT confirmed "
+                               f"— manual verification required: {dangerous_payload}")
+
+            result = AttackResult(
+                attack_type=AttackType.MASS_ASSIGNMENT,
+                url=url,
+                method=method,
+                vulnerable=True,
+                confidence=confidence,
+                evidence={
+                    'injected_params': dangerous_payload,
+                    'status_code': response['status_code'],
+                    'reflected': reflected,
+                    'response_preview': response['text'][:500]
+                },
+                description=description,
+                remediation="Use allowlist/DTO pattern for input validation"
+            )
+            results.append(result)
+            self._raise_alert(result)
 
         return results
 
@@ -437,6 +462,19 @@ class HiddenParameterDiscovery:
         if baseline_response is None:
             return results
 
+        # Deuxième baseline pour mesurer la variance NATURELLE de la page (jeton
+        # CSRF, timestamp, pub, ordre aléatoire…). Sans ça, une page dynamique
+        # variant de plus de 100 octets entre deux requêtes identiques était un
+        # faux positif « hidden parameter ». Le seuil devient dynamique : au-dessus
+        # du bruit observé, avec un plancher de 100 octets.
+        baseline_response2 = self._get(url, headers=headers)
+        baseline_size = len(baseline_response['content'])
+        natural_variance = (
+            abs(len(baseline_response2['content']) - baseline_size)
+            if baseline_response2 else 0
+        )
+        diff_threshold = max(100, natural_variance * 2 + 50)
+
         for param_name, values in self.hidden_params:
             for value in values:
                 separator = '&' if '?' in url else '?'
@@ -446,8 +484,8 @@ class HiddenParameterDiscovery:
                 if response is None:
                     continue
 
-                content_diff = abs(len(response['content']) - len(baseline_response['content']))
-                is_vulnerable = content_diff > 100
+                content_diff = abs(len(response['content']) - baseline_size)
+                is_vulnerable = content_diff > diff_threshold
 
                 if is_vulnerable:
                     result = AttackResult(
@@ -459,8 +497,10 @@ class HiddenParameterDiscovery:
                         evidence={
                             'parameter': param_name,
                             'value': value,
-                            'baseline_size': len(baseline_response['content']),
-                            'modified_size': len(response['content'])
+                            'baseline_size': baseline_size,
+                            'modified_size': len(response['content']),
+                            'natural_variance': natural_variance,
+                            'diff_threshold': diff_threshold
                         },
                         description=f"Hidden parameter '{param_name}' changes response",
                         remediation="Remove debug parameters from production"

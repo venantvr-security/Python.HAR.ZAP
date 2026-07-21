@@ -1,0 +1,513 @@
+<style>
+  :root {
+    --ground: #f5f3f1;
+    --surface: #fbfaf9;
+    --surface-2: #efeae6;
+    --ink: #211d1b;
+    --muted: #6f645e;
+    --border: #e4ded9;
+    --accent: #c1403b;
+    --accent-soft: #f0d9d7;
+    --accent-ink: #ffffff;
+    --sev-crit: #b3261e;
+    --sev-high: #c2410c;
+    --sev-med: #a16207;
+    --sev-low: #5b6b7a;
+    --l-entry: #5b6b7a;
+    --l-ingest: #0f766e;
+    --l-zap: #3b5ba9;
+    --l-attack: #c1403b;
+    --l-analysis: #7c4a99;
+    --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #17130f;
+      --surface: #201b17;
+      --surface-2: #2a231e;
+      --ink: #f0eae4;
+      --muted: #a79b92;
+      --border: #352c26;
+      --accent: #e2726a;
+      --accent-soft: #3a221f;
+      --accent-ink: #1a1310;
+      --sev-crit: #f0685c;
+      --sev-high: #f08a4b;
+      --sev-med: #d6a838;
+      --sev-low: #8ba0b3;
+      --l-entry: #8ba0b3;
+      --l-ingest: #3fbfae;
+      --l-zap: #7d9be8;
+      --l-attack: #e2726a;
+      --l-analysis: #b98ad6;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f5f3f1; --surface: #fbfaf9; --surface-2: #efeae6; --ink: #211d1b;
+    --muted: #6f645e; --border: #e4ded9; --accent: #c1403b; --accent-soft: #f0d9d7;
+    --accent-ink: #ffffff; --sev-crit: #b3261e; --sev-high: #c2410c; --sev-med: #a16207;
+    --sev-low: #5b6b7a; --l-entry: #5b6b7a; --l-ingest: #0f766e; --l-zap: #3b5ba9;
+    --l-attack: #c1403b; --l-analysis: #7c4a99;
+  }
+  :root[data-theme="dark"] {
+    --ground: #17130f; --surface: #201b17; --surface-2: #2a231e; --ink: #f0eae4;
+    --muted: #a79b92; --border: #352c26; --accent: #e2726a; --accent-soft: #3a221f;
+    --accent-ink: #1a1310; --sev-crit: #f0685c; --sev-high: #f08a4b; --sev-med: #d6a838;
+    --sev-low: #8ba0b3; --l-entry: #8ba0b3; --l-ingest: #3fbfae; --l-zap: #7d9be8;
+    --l-attack: #e2726a; --l-analysis: #b98ad6;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: clamp(1.25rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 5rem; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 .6rem;
+  }
+  h1 {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: clamp(2.1rem, 6vw, 3.4rem);
+    letter-spacing: -.01em;
+    margin: 0 0 .5rem;
+    text-wrap: balance;
+  }
+  h1 .dim { color: var(--muted); }
+  .lede {
+    font-size: clamp(1rem, 2.4vw, 1.18rem);
+    color: var(--muted);
+    max-width: 60ch;
+    margin: 0 0 1.6rem;
+  }
+
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .stat { flex: 1 1 130px; padding: .85rem 1.1rem; border-right: 1px solid var(--border); }
+  .stat:last-child { border-right: 0; }
+  .stat .n { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700; line-height: 1; }
+  .stat .l { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-top: .3rem; }
+
+  section { margin-top: clamp(2.4rem, 6vw, 3.6rem); }
+  h2 {
+    font-family: var(--font-mono);
+    font-size: 1.02rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    margin: 0 0 .3rem;
+    display: flex; align-items: baseline; gap: .6rem;
+  }
+  h2::before { content: ""; width: 10px; height: 10px; background: var(--accent); border-radius: 2px; transform: translateY(1px); flex: 0 0 auto; }
+  .sub { color: var(--muted); font-size: .92rem; margin: 0 0 1.3rem; max-width: 64ch; }
+
+  /* pipeline */
+  .pipe { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .step {
+    flex: 1 1 150px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: .7rem .8rem .8rem;
+    position: relative;
+    min-width: 0;
+  }
+  .step .k { font-family: var(--font-mono); font-size: .72rem; color: var(--accent); font-weight: 700; }
+  .step .t { font-weight: 600; font-size: .9rem; margin-top: .12rem; }
+  .step .d { font-size: .78rem; color: var(--muted); margin-top: .18rem; line-height: 1.4; }
+
+  /* layers */
+  .layers { display: flex; flex-direction: column; gap: .5rem; }
+  .band {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--layer, var(--accent));
+    border-radius: 9px;
+    padding: .9rem 1.05rem;
+  }
+  .band-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .band-head .name { font-family: var(--font-mono); font-weight: 700; font-size: .92rem; color: var(--layer, var(--ink)); letter-spacing: .02em; }
+  .band-head .role { font-size: .8rem; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: .38rem; }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: .76rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .22rem .5rem;
+    white-space: nowrap;
+  }
+  .chip.hot { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .flowdown { text-align: center; color: var(--muted); font-family: var(--font-mono); font-size: .9rem; line-height: 1; margin: -.1rem 0; }
+
+  .foundation {
+    margin-top: .5rem;
+    background: var(--accent-soft);
+    border: 1px dashed var(--accent);
+    border-radius: 9px;
+    padding: .8rem 1.05rem;
+    display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
+  }
+  .foundation .lbl { font-family: var(--font-mono); font-size: .74rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  .foundation .txt { font-size: .86rem; color: var(--ink); }
+  .foundation code { font-family: var(--font-mono); font-weight: 700; }
+
+  /* table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; background: var(--surface); }
+  th, td { text-align: left; padding: .6rem .85rem; border-bottom: 1px solid var(--border); font-size: .86rem; vertical-align: top; }
+  th { font-family: var(--font-mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; background: var(--surface-2); }
+  tr:last-child td { border-bottom: 0; }
+  td.tab { font-weight: 600; white-space: nowrap; }
+  td.mod code, td.fn code { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); }
+  .em code { color: var(--accent) !important; font-weight: 700; }
+
+  /* llm flow */
+  .llmflow { display: flex; flex-wrap: wrap; align-items: stretch; gap: .5rem; }
+  .node {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    padding: .6rem .8rem; flex: 1 1 130px; min-width: 0;
+  }
+  .node .nn { font-family: var(--font-mono); font-size: .8rem; font-weight: 700; }
+  .node .nd { font-size: .76rem; color: var(--muted); margin-top: .15rem; }
+  .arrow { align-self: center; color: var(--accent); font-family: var(--font-mono); font-weight: 700; }
+  .aside {
+    margin-top: .6rem; font-size: .82rem; color: var(--muted);
+    border-left: 3px solid var(--l-analysis); padding-left: .8rem;
+  }
+
+  /* bugs */
+  .resolved {
+    --ok: #15803d;
+    border: 1px solid var(--ok); border-radius: 10px; padding: 1rem 1.2rem;
+    background: color-mix(in srgb, var(--ok) 10%, var(--surface));
+    margin-bottom: 1.5rem; display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap;
+  }
+  @media (prefers-color-scheme: dark) { .resolved { --ok: #4ade80; } }
+  :root[data-theme="dark"] .resolved { --ok: #4ade80; }
+  :root[data-theme="light"] .resolved { --ok: #15803d; }
+  .resolved .check { font-family: var(--font-mono); font-weight: 700; color: var(--ok); font-size: 1rem; }
+  .resolved .txt { font-size: .9rem; }
+  .resolved .txt strong { color: var(--ok); }
+
+  /* bug findings */
+  .sevrow { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); margin-bottom: 1.4rem; }
+  .sevrow .cell { flex: 1; padding: .8rem 1rem; border-right: 1px solid var(--border); }
+  .sevrow .cell:last-child { border-right: 0; }
+  .sevrow .n { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700; line-height: 1; }
+  .sevrow .l { font-size: .72rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin-top: .32rem; }
+  .sevrow .cell.hi .n { color: var(--sev-high); }
+  .sevrow .cell.me .n { color: var(--sev-med); }
+  .sevrow .cell.lo .n { color: var(--sev-low); }
+
+  .pattern {
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 1rem 1.15rem; margin-bottom: 1.6rem;
+  }
+  .pattern h3 { font-family: var(--font-mono); font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 0 0 .4rem; }
+  .pattern p { margin: 0; font-size: .88rem; }
+  .pattern code { font-family: var(--font-mono); font-size: .82rem; }
+
+  .grp-title { font-family: var(--font-mono); font-size: .82rem; text-transform: uppercase; letter-spacing: .09em; margin: 1.6rem 0 .7rem; display: flex; align-items: center; gap: .5rem; }
+  .grp-title::before { content: ""; width: 9px; height: 9px; border-radius: 2px; }
+  .grp-title.hi::before { background: var(--sev-high); }
+  .grp-title.me::before { background: var(--sev-med); }
+  .grp-title.lo::before { background: var(--sev-low); }
+
+  .bugs { display: flex; flex-direction: column; gap: .5rem; }
+  .bug { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--bsev, var(--sev-med)); border-radius: 9px; padding: .75rem .95rem; }
+  .bug.hi { --bsev: var(--sev-high); }
+  .bug.me { --bsev: var(--sev-med); }
+  .bug.lo { --bsev: var(--sev-low); }
+  .bug .loc { font-family: var(--font-mono); font-size: .78rem; font-weight: 700; color: var(--bsev); }
+  .bug .tag { font-family: var(--font-mono); font-size: .66rem; text-transform: uppercase; letter-spacing: .06em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: .08rem .4rem; color: var(--muted); margin-left: .5rem; vertical-align: middle; }
+  .bug .desc { font-size: .87rem; margin-top: .25rem; }
+  .bug .desc code { font-family: var(--font-mono); font-size: .8rem; background: var(--surface-2); padding: .04rem .3rem; border-radius: 4px; }
+  .lowlist { display: flex; flex-direction: column; gap: .35rem; }
+  .lowlist .li { font-size: .84rem; padding-left: 1rem; position: relative; }
+  .lowlist .li::before { content: "·"; position: absolute; left: .2rem; color: var(--sev-low); font-weight: 700; }
+  .lowlist .li code { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); }
+
+  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .78rem; font-family: var(--font-mono); }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Carte d'architecture · branche llm</p>
+    <h1>HAR&#8288;-&#8288;ZAP <span class="dim">/ plateforme DAST</span></h1>
+    <p class="lede">On part d'un fichier HAR (le trafic HTTP capturé au navigateur) et on l'utilise pour piloter des attaques automatisées, principalement via OWASP ZAP. Trois façons de lancer le même moteur.</p>
+    <div class="stats">
+      <div class="stat"><div class="n">3</div><div class="l">points d'entrée</div></div>
+      <div class="stat"><div class="n">11</div><div class="l">onglets UI</div></div>
+      <div class="stat"><div class="n">~50</div><div class="l">modules</div></div>
+      <div class="stat"><div class="n">~40k</div><div class="l">lignes Python</div></div>
+      <div class="stat"><div class="n">1</div><div class="l">socle HTTP partagé</div></div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Le flux de bout en bout</h2>
+    <p class="sub">Les 9 étapes du pipeline historique (<code>orchestrator.py</code>) — c'est le chemin le plus lisible pour comprendre l'enchaînement complet d'un scan.</p>
+    <div class="pipe">
+      <div class="step"><div class="k">01</div><div class="t">Analyse HAR</div><div class="d">Endpoints, params fuzzables, auth extraite</div></div>
+      <div class="step"><div class="k">02</div><div class="t">Démarrage ZAP</div><div class="d">Conteneur Docker piloté</div></div>
+      <div class="step"><div class="k">03</div><div class="t">Config scanner</div><div class="d">Contexte + politiques de scan</div></div>
+      <div class="step"><div class="k">04</div><div class="t">Fingerprint</div><div class="d">Détection des technologies</div></div>
+      <div class="step"><div class="k">05</div><div class="t">Découverte</div><div class="d">Spider + Ajax Spider</div></div>
+      <div class="step"><div class="k">06</div><div class="t">Scan passif</div><div class="d">Headers, PII, entropie tokens</div></div>
+      <div class="step"><div class="k">07</div><div class="t">Apprentissage</div><div class="d">Réglage adaptatif des seuils</div></div>
+      <div class="step"><div class="k">08</div><div class="t">Scan actif</div><div class="d">Ciblé + scripts custom</div></div>
+      <div class="step"><div class="k">09</div><div class="t">Méta-analyse</div><div class="d">Dédup + rapports multi-formats</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Les couches</h2>
+    <p class="sub">Chaque bande descend vers la suivante. Le point à retenir : quasi toutes les attaques reposent sur <strong>un seul</strong> client HTTP partagé.</p>
+    <div class="layers">
+
+      <div class="band" style="--layer: var(--l-entry)">
+        <div class="band-head"><span class="name">Points d'entrée</span><span class="role">lancer le moteur</span></div>
+        <div class="chips">
+          <span class="chip">app.py — Streamlit, 11 onglets</span>
+          <span class="chip">cli.py — CI/CD (SARIF, JUnit)</span>
+          <span class="chip">orchestrator.py — legacy</span>
+        </div>
+      </div>
+      <div class="flowdown">↓</div>
+
+      <div class="band" style="--layer: var(--l-ingest)">
+        <div class="band-head"><span class="name">Ingestion HAR</span><span class="role">lire &amp; préparer le trafic</span></div>
+        <div class="chips">
+          <span class="chip">har_analyzer</span><span class="chip">har_preprocessor</span>
+          <span class="chip">har_diff</span><span class="chip">token_extractor</span>
+          <span class="chip">payload_analyzer</span><span class="chip">payload_reconstructor</span>
+          <span class="chip">dictionary_manager</span>
+        </div>
+      </div>
+      <div class="flowdown">↓</div>
+
+      <div class="band" style="--layer: var(--l-zap)">
+        <div class="band-head"><span class="name">Orchestration ZAP</span><span class="role">piloter le scanner</span></div>
+        <div class="chips">
+          <span class="chip">docker_manager</span><span class="chip">zap_scanner</span>
+          <span class="chip">zap_orchestrator</span><span class="chip">zap_passive_scanner</span>
+          <span class="chip">zap_fuzzer</span><span class="chip">script_manager</span>
+          <span class="chip">adaptive_tuner</span><span class="chip">trainer</span>
+        </div>
+      </div>
+      <div class="flowdown">↓</div>
+
+      <div class="band" style="--layer: var(--l-attack)">
+        <div class="band-head"><span class="name">Attaques</span><span class="role">offensif + passif</span></div>
+        <div class="chips">
+          <span class="chip hot">redteam_attacks</span><span class="chip hot">idor_detector</span>
+          <span class="chip">passive_analysis</span><span class="chip">cors_tester</span>
+          <span class="chip">jwt_attacks</span><span class="chip">cache_poisoning</span>
+          <span class="chip">http_smuggling</span><span class="chip">graphql_scanner</span>
+          <span class="chip">websocket_scanner</span><span class="chip">timing_analysis</span>
+        </div>
+        <div class="foundation">
+          <span class="lbl">Socle</span>
+          <span class="txt">Presque toutes ces attaques envoient leurs requêtes via <code>zap_http_client</code> — le point d'entrée unique pour comprendre comment une requête d'attaque part réellement.</span>
+        </div>
+      </div>
+      <div class="flowdown">↓</div>
+
+      <div class="band" style="--layer: var(--l-analysis)">
+        <div class="band-head"><span class="name">Analyse &amp; sortie</span><span class="role">consolider &amp; décider</span></div>
+        <div class="chips">
+          <span class="chip">meta_analyzer</span><span class="chip">correlator</span>
+          <span class="chip">owasp_mapper</span><span class="chip">fp_store</span>
+          <span class="chip">acceptance_engine</span><span class="chip">reporter</span>
+          <span class="chip">findings_store</span><span class="chip">findings_bundle</span>
+          <span class="chip">notifications</span><span class="chip">webhook_sender</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Les 11 onglets → quel moteur</h2>
+    <p class="sub">L'UI Streamlit est la façade la plus complète. Chaque onglet appelle une fonction <code>render_*</code> qui délègue à un ou plusieurs modules.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>#</th><th>Onglet</th><th>Fonction</th><th>Moteur derrière</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td class="tab">📚 Guide</td><td class="fn"><code>render_guide_tab</code></td><td class="mod"><code>ui_guide</code></td></tr>
+          <tr class="em"><td>1</td><td class="tab">📤 Upload</td><td class="fn"><code>render_upload_tab</code></td><td class="mod"><code>har_analyzer</code> + <code>llm.analyzer</code></td></tr>
+          <tr><td>2</td><td class="tab">🔧 Preprocess</td><td class="fn"><code>render_preprocessing_tab</code></td><td class="mod"><code>har_preprocessor</code>, <code>payload_analyzer</code>, <code>dictionary_manager</code></td></tr>
+          <tr><td>3</td><td class="tab">🔍 ZAP Scan</td><td class="fn"><code>render_zap_scan_tab</code></td><td class="mod"><code>docker_manager</code>, <code>zap_scanner</code></td></tr>
+          <tr><td>4</td><td class="tab">⚡ Fuzzer</td><td class="fn"><code>render_fuzzer_tab</code></td><td class="mod"><code>zap_fuzzer</code>, <code>token_extractor</code></td></tr>
+          <tr><td>5</td><td class="tab">🎯 IDOR</td><td class="fn"><code>render_idor_tab</code></td><td class="mod"><code>idor_detector</code></td></tr>
+          <tr><td>6</td><td class="tab">🔴 Red Team</td><td class="fn"><code>render_redteam_tab</code></td><td class="mod"><code>redteam_attacks</code></td></tr>
+          <tr><td>7</td><td class="tab">🔵 Passive</td><td class="fn"><code>render_passive_tab</code></td><td class="mod"><code>passive_analysis</code></td></tr>
+          <tr class="em"><td>8</td><td class="tab">🧪 Advanced</td><td class="fn"><code>render_advanced_tab</code></td><td class="mod"><code>ui_advanced</code> → 7 scanners spécialisés</td></tr>
+          <tr><td>9</td><td class="tab">📊 Results</td><td class="fn"><code>render_results_tab</code></td><td class="mod"><code>correlator</code>, <code>meta_analyzer</code>, <code>reporter</code></td></tr>
+          <tr><td>10</td><td class="tab">✅ Acceptance</td><td class="fn"><code>render_acceptance_tab</code></td><td class="mod"><code>acceptance_engine</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="aside">Deux <strong>agrégateurs</strong> : <code>ui_advanced</code> regroupe l'onglet Advanced (CORS, JWT, cache poisoning, smuggling, GraphQL, WebSocket, timing) ; l'onglet Results fait la synthèse. Le README parle encore de « 9 onglets » — périmé, il y en a 11 (Guide et Advanced ajoutés).</p>
+  </section>
+
+  <section>
+    <h2>La couche LLM <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;font-size:.82rem;">— spécifique à la branche <code>llm</code></span></h2>
+    <p class="sub">~1800 lignes dans <code>modules/llm/</code>, branchées en <strong>un seul endroit</strong> : l'onglet Upload. Un appel Claude par HAR produit un plan d'attaque adapté au métier.</p>
+    <div class="llmflow">
+      <div class="node"><div class="nn">context_extractor</div><div class="nd">résume le trafic HAR</div></div>
+      <span class="arrow">→</span>
+      <div class="node"><div class="nn">client</div><div class="nd">1 appel Claude</div></div>
+      <span class="arrow">→</span>
+      <div class="node"><div class="nn">analyzer</div><div class="nd">→ SecurityPlan</div></div>
+      <span class="arrow">→</span>
+      <div class="node"><div class="nn">strategies/</div><div class="nd">idor, mass-assign, race…</div></div>
+      <span class="arrow">→</span>
+      <div class="node"><div class="nn">zap_integration</div><div class="nd">exporte vers ZAP</div></div>
+    </div>
+    <p class="aside"><code>cache.py</code> + <code>pattern_store.py</code> évitent de rappeler le LLM pour un HAR déjà vu (persistance par session).</p>
+  </section>
+
+  <section>
+    <h2>Chasse aux bugs</h2>
+    <p class="sub">Audit de correction réparti sur 4 sous-systèmes, chaque bug relu dans le code réel avec un scénario de déclenchement concret. Aucune supposition — seulement des bugs confirmés.</p>
+
+    <div class="resolved">
+      <span class="check">✓ RÉSOLU</span>
+      <span class="txt">Les <strong>29 bugs corrigés</strong> — <strong>997 tests verts</strong> (1 ignoré). <strong>11 tests de détection</strong> ajoutés qui exercent une vraie vuln (pas seulement le type de retour), pour fermer le trou de couverture qui avait laissé passer les détections mortes.</span>
+    </div>
+
+    <div class="sevrow">
+      <div class="cell hi"><div class="n">6</div><div class="l">Haute</div></div>
+      <div class="cell me"><div class="n">11</div><div class="l">Moyenne</div></div>
+      <div class="cell lo"><div class="n">12</div><div class="l">Basse</div></div>
+    </div>
+
+    <div class="pattern">
+      <h3>⚠ Le motif qui revient</h3>
+      <p>Plusieurs détections sont <strong>silencieusement mortes</strong> : un wrapper <code>_get()</code> renvoie un <em>dict</em>, mais la fonction y accède en attributs (<code>response.status_code</code>) → <code>AttributeError</code> avalée par un <code>except</code> → retour <code>None</code>. Les tests unitaires ne l'attrapent pas car ils n'assèrent que le <em>type</em> du retour, jamais la détection effective d'une vuln. Résultat : l'outil paraît fonctionner mais rate de vraies vulnérabilités.</p>
+    </div>
+
+    <div class="grp-title hi">Haute — faux négatifs &amp; fuites</div>
+    <div class="bugs">
+      <div class="bug hi">
+        <div><span class="loc">cors_tester.py:157</span><span class="tag">faux négatif</span></div>
+        <div class="desc">Détection CORS (réflexion d'origine, bypass, vary) <strong>entièrement morte</strong> : <code>response.headers</code> sur un dict. Une réflexion <code>Origin: evil.com</code> + <code>credentials: true</code> (CVSS 9.8) n'est jamais signalée.</div>
+      </div>
+      <div class="bug hi">
+        <div><span class="loc">graphql_scanner.py:94 · websocket_scanner.py:62</span><span class="tag">faux négatif</span></div>
+        <div class="desc">Lecture <code>har_data['entries']</code> au lieu de <code>har_data['log']['entries']</code> → <strong>0 endpoint détecté</strong> sur tout HAR réel. Le scan GraphQL/WebSocket est toujours vide.</div>
+      </div>
+      <div class="bug hi">
+        <div><span class="loc">jwt_attacks.py:411</span><span class="tag">faux négatif</span></div>
+        <div class="desc">Attaque <strong>KID injection morte</strong> : <code>response.status_code</code> sur un dict. Un path-traversal <code>kid=../../dev/null</code> (secret vide) réussi n'est jamais détecté.</div>
+      </div>
+      <div class="bug hi">
+        <div><span class="loc">zap_fuzzer.py:113</span><span class="tag">faux négatif</span></div>
+        <div class="desc"><code>return</code> placé <strong>dans</strong> la boucle <code>for param in id_params</code> → le fuzzer IDOR ne teste que le <strong>premier</strong> paramètre. Sur <code>?user_id=1&amp;doc_id=5</code>, <code>doc_id</code> (souvent le vrai vecteur) est ignoré.</div>
+      </div>
+      <div class="bug hi">
+        <div><span class="loc">docker_manager.py:42</span><span class="tag">fuite ressource</span></div>
+        <div class="desc"><code>start_zap()</code> crée le conteneur puis <code>_wait_for_zap()</code> peut lever <code>TimeoutError</code> sans l'arrêter. Sur le chemin <code>app.py</code> (sans <code>finally</code>), chaque échec empile un conteneur orphelin.</div>
+      </div>
+      <div class="bug hi">
+        <div><span class="loc">har_preprocessor.py:70</span><span class="tag">état accumulé</span></div>
+        <div class="desc"><code>process()</code> fait des <code>.append()</code> sans réinitialiser l'état. Enchaîner <code>print_summary()</code> puis <code>save()</code> <strong>double</strong> les données extraites (et mute rétroactivement le 1ᵉʳ résultat, passé par référence).</div>
+      </div>
+    </div>
+
+    <div class="grp-title me">Moyenne — logique &amp; calibrage</div>
+    <div class="bugs">
+      <div class="bug me">
+        <div><span class="loc">acceptance_engine.py:188</span><span class="tag">CI · faux échec</span></div>
+        <div class="desc">Précédence d'opérateur dans <code>_check_no_xss</code> : <code>and</code> lie plus fort que <code>or</code>, donc la garde de risque ne couvre pas la clause <code>'xss'</code>. Une alerte XSS en risque <em>Low</em> fait échouer le build à tort (le pendant SQL est correct).</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">owasp_mapper.py:196</span><span class="tag">CI · faux succès</span></div>
+        <div class="desc"><code>cweid</code> (chaîne côté ZAP) comparé à une liste d'entiers → match par CWE mort. Une alerte High mappable seulement par CWE tombe en « unmapped » et ne fait pas échouer le verdict OWASP.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">llm/context_extractor.py:228</span><span class="tag">cache · collision</span></div>
+        <div class="desc">Clé de cache LLM = nombre d'entrées + chemins, <strong>sans le domaine</strong>. Deux hôtes de même structure (<code>api.foo.com</code>/<code>api.bar.com</code>) → le 2ᵉ scan reçoit le plan d'attaque du 1ᵉʳ.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">adaptive_tuner.py:85</span><span class="tag">code mort</span></div>
+        <div class="desc"><code>fp_count &gt; 5</code> alors que le compteur ne monte que de +1 par appel, appelé une seule fois. Tout le réglage adaptatif anti-faux-positifs ne se déclenche jamais.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">redteam_attacks.py:313</span><span class="tag">faux positif</span></div>
+        <div class="desc">Mass assignment signalé sur simple « 2xx sans "error" ». Un <code>204 No Content</code> qui ignore le champ <code>role:admin</code> est faussement rapporté comme escalade acceptée (confiance 0.7).</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">cache_poisoning.py:204</span><span class="tag">faux positif</span></div>
+        <div class="desc">Le même jeton <code>rand</code> sert de cache-buster (<code>?cb=rand</code>) <em>et</em> de marqueur. Toute appli qui reflète la query string (lien canonique, <code>og:url</code>) déclenche un faux « cache poisoning » à confiance 0.9.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">idor_detector.py:222</span><span class="tag">faux nég. + faux pos.</span></div>
+        <div class="desc">La bande de ratio <code>[0.1, 0.5)</code> tombe sur le <em>return</em> « faux positif » final (un IDOR à ressource plus petite est raté). Et le fallback suit les redirections → un <code>302→login</code> peut passer pour VULNERABLE.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">payload_analyzer.py:299 · payload_reconstructor.py:189</span><span class="tag">code mort</span></div>
+        <div class="desc"><code>isinstance(v, int)</code> testé avant <code>isinstance(v, bool)</code> ; comme <code>bool</code> hérite d'<code>int</code>, les branches booléennes sont mortes → un booléen est étiqueté <code>_INT</code> et le juggling <code>bool→int</code> n'est jamais généré.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">token_extractor.py:206</span><span class="tag">faux positif</span></div>
+        <div class="desc"><code>'id' in param_lower</code> matche <code>width</code>, <code>hidden</code>, <code>provider</code>… → des valeurs non-identifiantes polluent la wordlist d'IDs qui alimente l'IDOR.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">zap_http_client.py:97</span><span class="tag">requête mal formée</span></div>
+        <div class="desc"><code>Content-Length: len(body)</code> compte les <strong>caractères</strong>, pas les octets UTF-8. Un corps accentué (<code>montant=déjà payé</code>) annonce une taille trop courte → tronqué côté serveur.</div>
+      </div>
+      <div class="bug me">
+        <div><span class="loc">zap_scanner.py:245</span><span class="tag">blocage</span></div>
+        <div class="desc"><code>while spider.status &lt; 100</code> sans borne temporelle (contrairement aux autres <code>_wait_*</code>). Un spider gelé à un statut stable boucle indéfiniment en plein pipeline synchrone.</div>
+      </div>
+    </div>
+
+    <div class="grp-title lo">Basse — bruit, robustesse, reporting</div>
+    <div class="lowlist">
+      <div class="li"><code>reporter.py:200</code> — empreinte SARIF via <code>hash()</code> natif (salé par process) → non déterministe entre runs, suivi GitHub Code Scanning cassé.</div>
+      <div class="li"><code>llm/analyzer.py:116</code> — un plan LLM vide (échec de parsing) est mis en cache 24 h → tous les runs suivants sur ce HAR ne réessaient pas.</div>
+      <div class="li"><code>passive_analysis.py:321</code> — seuil d'entropie <code>&lt; 4.0</code> par caractère → quasiment tout token hex de 32 car. (128 bits, solide) faussement « Weak Token ».</div>
+      <div class="li"><code>zap_passive_scanner.py:188</code> — seuil <code>session_id = 4.5</code> par symbole, inatteignable (max <code>log2(16)=4.0</code>) → faux positif garanti sur tout token ≤ 22 car.</div>
+      <div class="li"><code>redteam_attacks.py:449</code> — hidden param détecté sur diff &gt; 100 octets contre une baseline unique → faux positif sur page dynamique (CSRF, timestamp).</div>
+      <div class="li"><code>http_smuggling.py:172</code> — <code>'400' in resp and '200' in resp</code> matche n'importe où (corps inclus) → faux « smuggling » Critical sur du JSON contenant ces chiffres.</div>
+      <div class="li"><code>jwt_attacks.py:262</code> — « none algorithm » ne teste que la longueur (le commentaire promet une similarité) → faux positif si l'API renvoie <code>200 {"error":...}</code>.</div>
+      <div class="li"><code>findings_store</code> / <code>fp_store</code> — clé de dédup sans <code>param</code> → deux alertes du même plugin sur des params différents fusionnées, une vuln perdue.</div>
+      <div class="li"><code>payload_reconstructor.py:58</code> — <code>_set_nested_value</code> lève <code>TypeError</code> si un segment de chemin chevauche un champ scalaire (<code>{"user":"bob"}</code> + <code>user.id</code>).</div>
+      <div class="li"><code>parse_qs</code> sans <code>keep_blank_values</code> (har_analyzer, har_preprocessor, token_extractor, har_diff) → params vides ignorés (<code>?redirect=</code> open-redirect manqué).</div>
+      <div class="li"><code>payload_analyzer.py:121</code> — off-by-one sur <code>frequency</code> : compteur créé à 1 puis incrémenté à la création → toujours occurrences + 1.</div>
+      <div class="li"><code>zap_http_client.py:313</code> — filtre <code>get_alerts(risk)</code> passe une chaîne (<code>'High'</code>) là où ZAP attend un <code>riskid</code> entier 0-3 → filtre incohérent.</div>
+    </div>
+
+    <p class="aside" style="border-left-color: var(--sev-low); margin-top: 1.4rem;">Deux bonnes nouvelles vérifiées : la logique pass/fail CI de <code>AcceptanceEngine.evaluate</code> n'est <strong>pas</strong> inversée, et <code>correlator</code>, <code>webhook_sender</code> (HMAC), <code>meta_analyzer</code>, <code>script_manager</code>, <code>trainer</code> sont sains. Le risque n'est pas dans le socle — il est dans des détections qui échouent en silence.</p>
+  </section>
+
+  <footer>
+    HAR-ZAP · carte d'architecture générée le 2026-07-21 · branche llm · pour test de sécurité autorisé uniquement
+  </footer>
+
+</div>

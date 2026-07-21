@@ -71,7 +71,10 @@ class CORSTester:
                 resp = self.zap_client.get(url, headers=headers)
                 return {
                     'status_code': resp.status_code,
-                    'headers': resp.headers,
+                    # En-têtes normalisés en minuscules : toute la détection CORS
+                    # compare des clés en minuscules (cf. CORS_HEADERS). Sans ça,
+                    # le fallback requests (Title-Case) fait échouer les lookups.
+                    'headers': {k.lower(): v for k, v in resp.headers.items()},
                     'text': resp.text
                 }
             else:
@@ -79,7 +82,7 @@ class CORSTester:
                 resp = requests.get(url, headers=headers, timeout=self.timeout, verify=False)
                 return {
                     'status_code': resp.status_code,
-                    'headers': dict(resp.headers),
+                    'headers': {k.lower(): v for k, v in resp.headers.items()},
                     'text': resp.text
                 }
         except Exception:
@@ -92,14 +95,14 @@ class CORSTester:
                 resp = self.zap_client.options(url, headers=headers)
                 return {
                     'status_code': resp.status_code,
-                    'headers': resp.headers
+                    'headers': {k.lower(): v for k, v in resp.headers.items()}
                 }
             else:
                 import requests
                 resp = requests.options(url, headers=headers, timeout=self.timeout, verify=False)
                 return {
                     'status_code': resp.status_code,
-                    'headers': dict(resp.headers)
+                    'headers': {k.lower(): v for k, v in resp.headers.items()}
                 }
         except Exception:
             return None
@@ -152,17 +155,20 @@ class CORSTester:
             return None
 
         try:
+            # `response` est le dict renvoyé par `_get` (pas un objet-réponse) :
+            # accès par clé, sinon AttributeError avalée → détection CORS morte.
+            headers = response['headers']
             cors_headers = {}
             for header in self.CORS_HEADERS:
-                value = response.headers.get(header)
+                value = headers.get(header)
                 if value:
                     cors_headers[header] = value
 
             return {
-                'status_code': response.status_code,
+                'status_code': response['status_code'],
                 'cors_headers': cors_headers,
-                'acao': response.headers.get('access-control-allow-origin', ''),
-                'acac': response.headers.get('access-control-allow-credentials', '').lower()
+                'acao': headers.get('access-control-allow-origin', ''),
+                'acac': headers.get('access-control-allow-credentials', '').lower()
             }
         except Exception:
             return None

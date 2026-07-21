@@ -182,11 +182,15 @@ class TokenEntropyAnalyzer:
         'csrf_token': re.compile(r'(?i)(csrf[_-]?token|xsrf[_-]?token)["\']?\s*[:=]\s*["\']?([a-zA-Z0-9_\-]{16,})'),
     }
 
+    # Seuils exprimés en BITS TOTAUX (entropie par symbole × longueur), pas par
+    # symbole : un seuil par symbole de 4.5 était inatteignable (un token hex
+    # plafonne à log2(16)=4.0), donc tout session_id hex était faussement flaggé.
+    # L'entropie totale mesure la vraie résistance au devinage (OWASP : >= 64 bits).
     ENTROPY_THRESHOLDS = {
-        'jwt': 4.0,  # JWTs should have high entropy
-        'session_id': 4.5,  # Session IDs must be unpredictable
-        'api_key': 4.0,  # API keys should be random
-        'csrf_token': 4.0,  # CSRF tokens must be random
+        'jwt': 64,
+        'session_id': 64,
+        'api_key': 80,
+        'csrf_token': 64,
     }
 
     def __init__(self, har_data: Dict):
@@ -262,22 +266,25 @@ class TokenEntropyAnalyzer:
             return None
 
         entropy = self.calculate_entropy(token)
-        threshold = self.ENTROPY_THRESHOLDS.get(token_type, 4.0)
+        total_bits = entropy * len(token)
+        threshold = self.ENTROPY_THRESHOLDS.get(token_type, 64)
 
-        if entropy < threshold:
-            severity = 'HIGH' if entropy < 3.0 else 'MEDIUM'
+        if total_bits < threshold:
+            severity = 'HIGH' if total_bits < threshold / 2 else 'MEDIUM'
 
             return SecurityIssue(
                 severity=severity,
                 category='Low Token Entropy',
                 title=f'Predictable {token_type.replace("_", " ").title()}',
-                description=f'Token has entropy {entropy:.2f} (threshold: {threshold}), may be predictable',
+                description=f'Token has {total_bits:.1f} bits total entropy '
+                            f'({entropy:.2f}/char, threshold: {threshold} bits), may be predictable',
                 evidence={
                     'url': url,
                     'token_type': token_type,
                     'token_preview': token[:10] + '...' if len(token) > 10 else token,
-                    'entropy': f'{entropy:.2f}',
-                    'threshold': str(threshold),
+                    'entropy_per_char': f'{entropy:.2f}',
+                    'total_bits': f'{total_bits:.1f}',
+                    'threshold_bits': str(threshold),
                     'length': len(token)
                 },
                 remediation='Use cryptographically secure random number generators (CSPRNG) for token generation'

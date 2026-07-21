@@ -183,7 +183,13 @@ class OWASPMapper:
         """Map a single alert to an OWASP category."""
         alert_id = str(alert.get('pluginId', ''))
         alert_name = alert.get('alert', '').lower()
-        cweid = alert.get('cweid', 0)
+        # L'API ZAP renvoie `cweid` en chaîne (ex. '79') ; les listes cibles sont
+        # des entiers. Sans conversion, `cweid in cat_info['cwes']` est toujours
+        # faux → le mapping par CWE est mort et des alertes tombent en « unmapped ».
+        try:
+            cweid = int(alert.get('cweid') or 0)
+        except (ValueError, TypeError):
+            cweid = 0
 
         # First try: direct alert ID match
         for cat_id, cat_info in OWASP_TOP_10_2021.items():

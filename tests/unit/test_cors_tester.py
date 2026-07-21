@@ -87,7 +87,10 @@ class TestCORSTester:
         result = tester._get('https://api.example.com/test', {'Origin': 'https://evil.com'})
 
         assert result['status_code'] == 200
-        assert 'Access-Control-Allow-Origin' in result['headers']
+        # Les en-têtes sont normalisés en minuscules : toute la détection CORS
+        # compare des clés en minuscules, sinon les lookups échouent silencieusement.
+        assert 'access-control-allow-origin' in result['headers']
+        assert result['headers']['access-control-allow-origin'] == '*'
 
     def test_get_with_zap_client(self, sample_har, config):
         mock_zap = Mock()

@@ -185,7 +185,10 @@ class AcceptanceEngine:
         alerts = results.get('zap_alerts', [])
         xss_alerts = [
             a for a in alerts
-            if 'xss' in a.get('alert', '').lower() or 'cross site scripting' in a.get('alert', '').lower()
+            # Parenthèses indispensables : sans elles, `and` lie plus fort que `or`
+            # et la garde de risque ne s'appliquerait qu'à la 2ᵉ clause → une alerte
+            # « XSS » en risque Low ferait échouer le build à tort.
+            if ('xss' in a.get('alert', '').lower() or 'cross site scripting' in a.get('alert', '').lower())
                and a.get('risk') in ['High', 'Medium']
         ]
         count = len(xss_alerts)

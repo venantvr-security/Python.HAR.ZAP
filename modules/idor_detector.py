@@ -68,7 +68,11 @@ class IDORDetector:
                 session = requests.Session()
                 if headers:
                     session.headers.update(headers)
-                response = session.request(method=method, url=url, timeout=10, verify=False)
+                # allow_redirects=False : un endpoint protégé par 302 → page de
+                # login (200) renverrait sinon un 200 et pourrait passer pour
+                # VULNERABLE. On veut voir le vrai statut de contrôle d'accès.
+                response = session.request(method=method, url=url, timeout=10,
+                                           verify=False, allow_redirects=False)
                 is_json = 'application/json' in response.headers.get('Content-Type', '')
                 return {
                     'status_code': response.status_code,
@@ -233,35 +237,41 @@ class IDORDetector:
                     proof={'message': 'Response too small, likely error page'}
                 )
 
-            if content_ratio >= self.MIN_CONTENT_THRESHOLD:
-                similarity = self._calculate_similarity(
-                    baseline.get('content', ''),
-                    test.get('content', '')
-                )
+            # Toute réponse 200/200 au-dessus du plancher "page d'erreur" est un
+            # IDOR potentiel. La confiance est proportionnelle au ratio de taille :
+            # la bande [FALSE_POSITIVE_THRESHOLD, MIN_CONTENT_THRESHOLD) ressort donc
+            # en confiance plus basse, au lieu d'être écartée à tort. Auparavant, un
+            # IDOR réel dont la ressource d'autrui est plus petite que la référence
+            # (ratio ~0.3) tombait dans le retour final « Unexpected status code: 200 ».
+            similarity = self._calculate_similarity(
+                baseline.get('content', ''),
+                test.get('content', '')
+            )
 
-                confidence = min(content_ratio, 1.0) * (1.0 if similarity < 0.95 else 0.7)
+            confidence = min(content_ratio, 1.0) * (1.0 if similarity < 0.95 else 0.7)
 
-                diff_html = self._generate_diff_html(
-                    baseline.get('content', ''),
-                    test.get('content', '')
-                )
+            diff_html = self._generate_diff_html(
+                baseline.get('content', ''),
+                test.get('content', '')
+            )
 
-                return IDORTestResult(
-                    url=variant['url'],
-                    method=variant['method'],
-                    status=IDORStatus.VULNERABLE,
-                    baseline_response=baseline,
-                    test_response=test,
-                    confidence=confidence,
-                    proof={
-                        'param': variant['modified_param'],
-                        'original_value': variant['original_value'],
-                        'test_value': variant['test_value'],
-                        'content_ratio': content_ratio,
-                        'similarity': similarity
-                    },
-                    diff_html=diff_html
-                )
+            return IDORTestResult(
+                url=variant['url'],
+                method=variant['method'],
+                status=IDORStatus.VULNERABLE,
+                baseline_response=baseline,
+                test_response=test,
+                confidence=confidence,
+                proof={
+                    'param': variant['modified_param'],
+                    'original_value': variant['original_value'],
+                    'test_value': variant['test_value'],
+                    'content_ratio': content_ratio,
+                    'similarity': similarity,
+                    'below_min_content': content_ratio < self.MIN_CONTENT_THRESHOLD
+                },
+                diff_html=diff_html
+            )
 
         return IDORTestResult(
             url=variant['url'],

@@ -57,7 +57,12 @@ def fingerprint(alert: Dict[str, Any]) -> str:
     if not isinstance(raw_evidence, str):
         raw_evidence = repr(raw_evidence)
     evidence = raw_evidence.strip()[:128]
-    payload = f"{plugin_id}|{path}|{evidence}".encode("utf-8")
+    # Le paramètre entre dans l'empreinte : deux alertes du même plugin sur le
+    # même chemin mais des paramètres différents (ex. XSS sur `q` et sur `search`)
+    # sont des vulnérabilités DISTINCTES — sans le param, elles fusionnaient et une
+    # vuln était perdue. Le query-string reste volontairement ignoré (cf. path).
+    param = str(alert.get("param") or "")
+    payload = f"{plugin_id}|{path}|{param}|{evidence}".encode("utf-8")
     return hashlib.sha1(payload).hexdigest()[:16]
 
 

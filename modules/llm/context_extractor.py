@@ -225,11 +225,15 @@ class HARContextExtractor:
 
     def _compute_har_hash(self) -> str:
         """Compute stable hash for HAR content."""
+        # Le domaine (netloc) DOIT entrer dans la clé : deux hôtes de même
+        # structure de chemins (api.foo.com / api.bar.com) produiraient sinon le
+        # même hash → le 2ᵉ scan recevrait du cache le plan d'attaque du 1ᵉʳ.
+        endpoints = set()
+        for e in self.entries:
+            parsed = urlparse(e.get('request', {}).get('url', ''))
+            endpoints.add(f"{parsed.netloc}{self._normalize_endpoint(parsed.path)}")
         content = json.dumps({
             'entries_count': len(self.entries),
-            'endpoints': sorted(set(
-                self._normalize_endpoint(urlparse(e.get('request', {}).get('url', '')).path)
-                for e in self.entries
-            ))
+            'endpoints': sorted(endpoints)
         }, sort_keys=True)
         return hashlib.sha256(content.encode()).hexdigest()[:16]

@@ -116,9 +116,12 @@ class PayloadAnalyzer:
                 schema={},
                 samples=[]
             )
+        else:
+            # frequency=1 par défaut compte déjà la 1ʳᵉ occurrence : on n'incrémente
+            # qu'aux occurrences SUIVANTES, sinon le compteur valait toujours N+1.
+            self.schemas[key].frequency += 1
 
         schema = self.schemas[key]
-        schema.frequency += 1
         schema.last_seen = datetime.now().isoformat()
 
         # Add sample (keep max 10 samples per schema)
@@ -190,9 +193,12 @@ class PayloadAnalyzer:
                         method=method,
                         variations=set()
                     )
+                else:
+                    # cf. schema : frequency=1 compte déjà la création, on
+                    # n'incrémente qu'aux occurrences suivantes (évite le N+1).
+                    self.key_value_dictionary[full_key].frequency += 1
 
                 kv = self.key_value_dictionary[full_key]
-                kv.frequency += 1
 
                 # Track variations (for simple types only)
                 if not isinstance(value, (dict, list)):
@@ -296,10 +302,12 @@ class PayloadAnalyzer:
                 template[key] = [self._create_template(v) if isinstance(v, dict) else '{{LIST_ITEM}}' for v in value[:1]]
             elif isinstance(value, str):
                 template[key] = f"{{{{{key.upper()}}}}}"
-            elif isinstance(value, int):
-                template[key] = f"{{{{{key.upper()}_INT}}}}"
+            # Bool AVANT int : bool est sous-classe d'int en Python, donc tester
+            # int en premier étiquetait les booléens en _INT et rendait _BOOL mort.
             elif isinstance(value, bool):
                 template[key] = f"{{{{{key.upper()}_BOOL}}}}"
+            elif isinstance(value, int):
+                template[key] = f"{{{{{key.upper()}_INT}}}}"
             else:
                 template[key] = value
 

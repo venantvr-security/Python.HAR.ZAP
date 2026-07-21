@@ -58,7 +58,7 @@ def _endpoint_key(entry: Dict[str, Any]) -> str:
 
 def _query_params(url: str) -> Set[str]:
     qs = urlparse(url).query
-    return set(parse_qs(qs).keys())
+    return set(parse_qs(qs, keep_blank_values=True).keys())
 
 
 def _post_params(entry: Dict[str, Any]) -> Set[str]:

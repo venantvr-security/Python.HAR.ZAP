@@ -1,6 +1,7 @@
 """
 Reporter - Multi-format security reports with OWASP mapping, timeline, and cURL reproduction.
 """
+import hashlib
 import json
 from pathlib import Path
 from datetime import datetime
@@ -197,7 +198,11 @@ class Reporter:
                     }
                 }],
                 "fingerprints": {
-                    "primary": f"{alert.get('pluginId')}_{hash(alert.get('url', ''))}"
+                    # SHA-1 déterministe (pas le hash() natif, salé par process) :
+                    # GitHub Code Scanning corrèle les alertes entre runs via cette
+                    # empreinte. Non déterministe → chaque run recrée les alertes.
+                    "primary": f"{alert.get('pluginId')}_"
+                               f"{hashlib.sha1(alert.get('url', '').encode()).hexdigest()[:16]}"
                 }
             })
         return results

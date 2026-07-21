@@ -3,6 +3,7 @@ HTTP Request Smuggling Detection
 CL.TE, TE.CL, TE.TE desync attacks
 Reference: https://portswigger.net/web-security/request-smuggling
 """
+import re
 import socket
 import ssl
 from dataclasses import dataclass
@@ -168,9 +169,12 @@ class HTTPSmugglingTester:
         if response_str.count('HTTP/1.') > 1:
             indicators.append('Multiple HTTP responses')
 
-        # Mixed status codes
-        if '400' in response_str and '200' in response_str:
-            indicators.append('Mixed status codes')
+        # Mixed status codes — on extrait les codes des LIGNES DE STATUT réelles
+        # (HTTP/1.x NNN) plutôt que de chercher '400'/'200' n'importe où : sinon un
+        # corps JSON contenant "200"/"400" (prix, IDs) déclenchait un faux positif.
+        status_codes = set(re.findall(r'HTTP/1\.\d\s+(\d{3})', response_str))
+        if len(status_codes) > 1:
+            indicators.append(f'Mixed status codes ({", ".join(sorted(status_codes))})')
 
         # Timeout (indicates desync)
         if response == b'TIMEOUT':

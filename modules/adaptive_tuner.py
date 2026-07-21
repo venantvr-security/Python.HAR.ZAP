@@ -65,7 +65,12 @@ class AdaptiveThresholdTuner:
 
                 # FP if >70% low confidence OR high frequency low-severity
                 if low_conf_ratio > 0.7 or stats['high_freq'] > 5:
-                    self.fp_tracker[scanner_id] += 1
+                    # analyze_alerts n'est appelé qu'une fois dans le pipeline :
+                    # incrémenter de +1 rendait le seuil `fp_count > 5` d'adjust_scanners
+                    # inatteignable (tout le réglage adaptatif était du code mort).
+                    # On incrémente du NOMBRE d'alertes bruyantes de ce scanner.
+                    noisy_count = stats['low_conf'] if low_conf_ratio > 0.7 else stats['high_freq']
+                    self.fp_tracker[scanner_id] += max(noisy_count, 1)
                     print(f"[Adaptive] Scanner {scanner_id} flagged (low_conf: {low_conf_ratio:.2f})")
 
         self.scanner_performance = scanner_stats

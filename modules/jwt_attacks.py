@@ -259,8 +259,19 @@ class JWTAttackTester:
                 # Verify not just a public endpoint
                 original_response = self._make_request_with_token(jwt_data, token)
                 if original_response and original_response['status_code'] == 200:
-                    # Check if responses are similar (indicates bypass worked)
-                    if len(response['content']) > 100:
+                    # Un vrai bypass « none » sert la MÊME ressource que le token
+                    # valide. On confirme réellement (le code ne testait que la
+                    # longueur) : corps substantiel, absence de marqueurs d'erreur
+                    # d'auth, ET similarité de taille avec la réponse d'origine.
+                    # Sinon un 200 {"error":"invalid token"} passait pour une vuln.
+                    none_body = (response.get('text') or '').lower()
+                    error_markers = ('invalid', 'error', 'unauthorized',
+                                     'expired', 'denied', 'forbidden', 'signature')
+                    has_error = any(m in none_body for m in error_markers)
+                    orig_len = len(original_response['content'])
+                    none_len = len(response['content'])
+                    similar = orig_len > 0 and min(none_len, orig_len) / max(none_len, orig_len) > 0.7
+                    if none_len > 100 and not has_error and similar:
                         result = JWTAttackResult(
                             url=jwt_data['url'],
                             attack_type='none_algorithm',
@@ -408,7 +419,9 @@ class JWTAttackTester:
 
                 response = self._make_request_with_token(jwt_data, test_token)
 
-                if response and response.status_code == 200 and len(response.content) > 100:
+                # `response` est le dict renvoyé par `_make_request_with_token` :
+                # accès par clé, sinon AttributeError avalée → attaque KID morte.
+                if response and response['status_code'] == 200 and len(response['content']) > 100:
                     return JWTAttackResult(
                         url=jwt_data['url'],
                         attack_type='kid_injection',
@@ -417,7 +430,7 @@ class JWTAttackTester:
                         evidence={
                             'original_kid': original_kid,
                             'injected_kid': kid_payload,
-                            'response_status': response.status_code
+                            'response_status': response['status_code']
                         },
                         severity="Critical"
                     )
