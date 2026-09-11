@@ -369,6 +369,29 @@ class PassiveAnalysisOrchestrator:
 
         return self.results
 
+    def adjudicate_false_positives(self, adjudicator, min_confidence: float = 0.7) -> Dict:
+        """Passe d'adjudication anti-faux-positifs sur tous les findings passifs.
+
+        Chaque SecurityIssue est annoté (`evidence['fp_verdict']`) et, si jugé faux
+        positif avec assez de confiance, retiré des résultats. On ne masque jamais
+        un vrai positif par excès de prudence (seuil de confiance requis).
+        """
+        reviewed = filtered = 0
+        for check_type, issues in list(self.results.items()):
+            kept_issues = []
+            for issue in issues:
+                verdict = adjudicator.adjudicate(issue)
+                reviewed += 1
+                if isinstance(issue.evidence, dict):
+                    issue.evidence['fp_verdict'] = verdict.to_dict()
+                if not verdict.is_true_positive and verdict.confidence >= min_confidence:
+                    filtered += 1
+                    continue
+                kept_issues.append(issue)
+            self.results[check_type] = kept_issues
+        return {'reviewed': reviewed, 'filtered_false_positives': filtered,
+                'source': 'llm' if getattr(adjudicator, 'available', False) else 'offline'}
+
     def get_critical_issues(self) -> List[SecurityIssue]:
         """Get all critical and high severity issues"""
         critical = []

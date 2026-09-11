@@ -164,6 +164,9 @@ Examples:
                              help='Emit OWASP API Top 10 2023 compliance report')
     diag_parser.add_argument('--ai', action='store_true',
                              help='Use the LLM (modules.llm) to classify OWASP-unmapped findings')
+    diag_parser.add_argument('--adaptive', action='store_true',
+                             help='Run adaptive closed-loop attacks (IDOR/mass-assignment/hidden-params) '
+                                  'and enrich payload patterns (PatternStore + ZAP export)')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -743,6 +746,75 @@ def run_advanced(args):
     return 0
 
 
+def _run_adaptive_campaign(har_data, config, args, zap_client=None):
+    """Lance la campagne adaptative avec des exécuteurs HTTP réels et enrichit
+    les patterns payloads. Retourne le résumé (aussi ajouté au rapport JSON).
+
+    Les attaques passent par le proxy ZAP quand un client ZAP est disponible
+    (elles sont alors tracées, proxyfiées et vues par le passif ZAP) ; sinon on
+    se rabat sur `requests` en direct."""
+    from urllib.parse import urlparse
+    from modules.llm.adaptive_campaign import AdaptiveCampaign
+    from modules.llm.pattern_enricher import PatternEnricher
+    from modules.llm.adaptive_idor import client_from_config
+    from modules.idor_detector import IDORDetector
+
+    # Les identifiants d'authentification du HAR sont rejoués pour tester l'accès
+    # avec le contexte du testeur (contexte offensif autorisé).
+    auth = IDORDetector.extract_auth_tokens(har_data) or {}
+
+    if zap_client is not None:
+        transport = 'ZAP proxy'
+
+        def http_get(url, method='GET'):
+            r = zap_client.request(method, url, headers=auth, follow_redirects=False)
+            return {'status': r.status_code, 'content_length': len(r.content or b''),
+                    'body': (r.text or '')[:2000]}
+
+        def http_write(url, method, payload):
+            r = zap_client.request(method, url, headers=auth, json_data=payload,
+                                   follow_redirects=False)
+            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
+    else:
+        transport = 'direct requests'
+        import requests
+
+        def http_get(url, method='GET'):
+            try:
+                r = requests.request(method, url, headers=auth, timeout=10,
+                                     verify=False, allow_redirects=False)
+                return {'status': r.status_code, 'content_length': len(r.content),
+                        'body': r.text[:2000]}
+            except Exception:
+                return {'status': 0, 'content_length': 0, 'body': ''}
+
+        def http_write(url, method, payload):
+            try:
+                r = requests.request(method, url, headers=auth, json=payload, timeout=10,
+                                     verify=False, allow_redirects=False)
+                return {'status': r.status_code, 'body': r.text[:2000]}
+            except Exception:
+                return {'status': 0, 'body': ''}
+
+    client = client_from_config(config)
+    domain = urlparse(args.target).netloc or 'unknown'
+    enricher = PatternEnricher.for_run(domain=domain, base_path='./patterns')
+
+    print(f"\n[ADAPTIVE] transport: {transport} | "
+          f"LLM: {'on' if client else 'offline heuristics'} | "
+          f"pattern store: {'active' if enricher.active else 'inactive'}")
+    result = AdaptiveCampaign(config, client=client, enricher=enricher).run(
+        har_data, http_get, http_write)
+
+    s = result.summary()
+    print(f"[ADAPTIVE] IDOR: {s['idor_vulnerable']} | mass-assignment: "
+          f"{s['mass_assignment_vulnerable']} | hidden-params: {s['hidden_params_vulnerable']}")
+    print(f"[ADAPTIVE] Patterns enriched: {s['patterns_enriched']}")
+    if result.exported:
+        print(f"[ADAPTIVE] ZAP wordlists updated: {', '.join(sorted(result.exported))}")
+    return s
+
+
 def _diag_findings_to_alerts(all_findings):
     """Map diagnose's flat findings (source/name/risk) to normalized OWASP alerts."""
     risk_norm = {'Critical': 'High', 'High': 'High', 'Medium': 'Medium',
@@ -891,12 +963,26 @@ def run_diagnose(args):
         # Passive Analysis
         print("[5/6] Passive Analysis...")
         from modules.passive_analysis import PassiveAnalysisOrchestrator
-        passive = PassiveAnalysisOrchestrator(har_data, config)
-        passive_results = passive.run_all()
-        passive_issues = passive_results.get('total_issues', 0)
+        passive = PassiveAnalysisOrchestrator(har_data)
+        passive.run_all_checks()
+
+        # Adjudication anti-faux-positifs (LLM si clé, sinon heuristiques offline).
+        fp_stats = None
+        if getattr(args, 'ai', False):
+            from modules.llm.fp_adjudicator import FalsePositiveAdjudicator
+            from modules.llm.adaptive_idor import client_from_config
+            adjudicator = FalsePositiveAdjudicator(client_from_config(config))
+            fp_stats = passive.adjudicate_false_positives(adjudicator)
+            print(f"  [AI] FP adjudication ({fp_stats['source']}): "
+                  f"reviewed {fp_stats['reviewed']}, filtered {fp_stats['filtered_false_positives']}")
+
+        passive_summary = passive.generate_summary()
+        passive_issues = passive_summary.get('total_issues', 0)
         adv_results['passive'] = passive_issues
-        for issue in passive_results.get('security_headers', {}).get('missing', []):
-            all_findings.append({'source': 'passive', 'risk': 'Low', 'name': f'Missing Header: {issue}', 'url': args.target})
+        for issue in passive.results.get('headers', []):
+            if getattr(issue, 'category', '') == 'Missing Security Header':
+                all_findings.append({'source': 'passive', 'risk': 'Low',
+                                     'name': issue.title, 'url': args.target})
         print(f"  Passive Issues: {passive_issues}")
 
         # Summary
@@ -920,6 +1006,8 @@ def run_diagnose(args):
             'breakdown': adv_results,
             'findings': all_findings
         }
+        if fp_stats is not None:
+            report['passive_fp_adjudication'] = fp_stats
 
         # Save JSON
         json_path = Path(args.output) / 'diagnostic_report.json'
@@ -942,6 +1030,14 @@ def run_diagnose(args):
         print(f"Low: {low_count}")
         print(f"Total: {len(all_findings)}")
         print(f"\nReports: {args.output}/diagnostic_report.*")
+
+        # Adaptive closed-loop attacks + payload pattern enrichment.
+        # Attaques via le proxy ZAP quand il est disponible (sinon requests direct).
+        if getattr(args, 'adaptive', False):
+            report['adaptive'] = _run_adaptive_campaign(har_data, config, args,
+                                                        zap_client=zap_client)
+            with open(json_path, 'w') as f:
+                json.dump(report, f, indent=2)
 
         # OWASP API Top 10 compliance from the full finding set
         if getattr(args, 'owasp_api', False):

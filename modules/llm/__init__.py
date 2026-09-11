@@ -9,6 +9,12 @@ from .context_extractor import HARContextExtractor, HARContext
 from .analyzer import LLMSecurityAnalyzer, SecurityPlan, AttackStrategy
 from .zap_integration import LLMZAPEnricher, DomainEnrichment, enrich_zap_from_har
 from .pattern_store import PatternStore, PatternSession, create_store
+from .adaptive_idor import AdaptiveIDORLoop, IDORFinding, IDORVerdict, IDORObservation, client_from_config
+from .adaptive_mass_assignment import AdaptiveMassAssignmentLoop, MAFinding
+from .pattern_enricher import PatternEnricher
+from .adaptive_hidden_params import AdaptiveHiddenParamsLoop, HPFinding
+from .adaptive_campaign import AdaptiveCampaign, CampaignResult
+from .fp_adjudicator import FalsePositiveAdjudicator, FPVerdict
 
 # Submodules
 from . import prompts
@@ -30,6 +36,20 @@ __all__ = [
     'PatternStore',
     'PatternSession',
     'create_store',
+    'AdaptiveIDORLoop',
+    'IDORFinding',
+    'IDORVerdict',
+    'IDORObservation',
+    'client_from_config',
+    'AdaptiveMassAssignmentLoop',
+    'MAFinding',
+    'PatternEnricher',
+    'AdaptiveHiddenParamsLoop',
+    'HPFinding',
+    'AdaptiveCampaign',
+    'CampaignResult',
+    'FalsePositiveAdjudicator',
+    'FPVerdict',
     'prompts',
     'strategies',
 ]
