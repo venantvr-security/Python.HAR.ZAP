@@ -12,6 +12,8 @@ from .pattern_store import PatternStore, PatternSession, create_store
 from .adaptive_idor import AdaptiveIDORLoop, IDORFinding, IDORVerdict, IDORObservation, client_from_config
 from .adaptive_mass_assignment import AdaptiveMassAssignmentLoop, MAFinding
 from .pattern_enricher import PatternEnricher
+from .adaptive_hidden_params import AdaptiveHiddenParamsLoop, HPFinding
+from .adaptive_campaign import AdaptiveCampaign, CampaignResult
 
 # Submodules
 from . import prompts
@@ -41,6 +43,10 @@ __all__ = [
     'AdaptiveMassAssignmentLoop',
     'MAFinding',
     'PatternEnricher',
+    'AdaptiveHiddenParamsLoop',
+    'HPFinding',
+    'AdaptiveCampaign',
+    'CampaignResult',
     'prompts',
     'strategies',
 ]

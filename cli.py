@@ -164,6 +164,9 @@ Examples:
                              help='Emit OWASP API Top 10 2023 compliance report')
     diag_parser.add_argument('--ai', action='store_true',
                              help='Use the LLM (modules.llm) to classify OWASP-unmapped findings')
+    diag_parser.add_argument('--adaptive', action='store_true',
+                             help='Run adaptive closed-loop attacks (IDOR/mass-assignment/hidden-params) '
+                                  'and enrich payload patterns (PatternStore + ZAP export)')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -743,6 +746,55 @@ def run_advanced(args):
     return 0
 
 
+def _run_adaptive_campaign(har_data, config, args):
+    """Lance la campagne adaptative avec des exécuteurs HTTP réels et enrichit
+    les patterns payloads. Retourne le résumé (aussi ajouté au rapport JSON)."""
+    from urllib.parse import urlparse
+    import requests
+    from modules.llm.adaptive_campaign import AdaptiveCampaign
+    from modules.llm.pattern_enricher import PatternEnricher
+    from modules.llm.adaptive_idor import client_from_config
+    from modules.idor_detector import IDORDetector
+
+    # Les identifiants d'authentification du HAR sont rejoués pour tester l'accès
+    # avec le contexte du testeur (contexte offensif autorisé).
+    auth = IDORDetector.extract_auth_tokens(har_data) or {}
+
+    def http_get(url, method='GET'):
+        try:
+            r = requests.request(method, url, headers=auth, timeout=10,
+                                 verify=False, allow_redirects=False)
+            return {'status': r.status_code, 'content_length': len(r.content),
+                    'body': r.text[:2000]}
+        except Exception:
+            return {'status': 0, 'content_length': 0, 'body': ''}
+
+    def http_write(url, method, payload):
+        try:
+            r = requests.request(method, url, headers=auth, json=payload, timeout=10,
+                                 verify=False, allow_redirects=False)
+            return {'status': r.status_code, 'body': r.text[:2000]}
+        except Exception:
+            return {'status': 0, 'body': ''}
+
+    client = client_from_config(config)
+    domain = urlparse(args.target).netloc or 'unknown'
+    enricher = PatternEnricher.for_run(domain=domain, base_path='./patterns')
+
+    print(f"\n[ADAPTIVE] LLM: {'on' if client else 'offline heuristics'} | "
+          f"pattern store: {'active' if enricher.active else 'inactive'}")
+    result = AdaptiveCampaign(config, client=client, enricher=enricher).run(
+        har_data, http_get, http_write)
+
+    s = result.summary()
+    print(f"[ADAPTIVE] IDOR: {s['idor_vulnerable']} | mass-assignment: "
+          f"{s['mass_assignment_vulnerable']} | hidden-params: {s['hidden_params_vulnerable']}")
+    print(f"[ADAPTIVE] Patterns enriched: {s['patterns_enriched']}")
+    if result.exported:
+        print(f"[ADAPTIVE] ZAP wordlists updated: {', '.join(sorted(result.exported))}")
+    return s
+
+
 def _diag_findings_to_alerts(all_findings):
     """Map diagnose's flat findings (source/name/risk) to normalized OWASP alerts."""
     risk_norm = {'Critical': 'High', 'High': 'High', 'Medium': 'Medium',
@@ -942,6 +994,12 @@ def run_diagnose(args):
         print(f"Low: {low_count}")
         print(f"Total: {len(all_findings)}")
         print(f"\nReports: {args.output}/diagnostic_report.*")
+
+        # Adaptive closed-loop attacks + payload pattern enrichment.
+        if getattr(args, 'adaptive', False):
+            report['adaptive'] = _run_adaptive_campaign(har_data, config, args)
+            with open(json_path, 'w') as f:
+                json.dump(report, f, indent=2)
 
         # OWASP API Top 10 compliance from the full finding set
         if getattr(args, 'owasp_api', False):

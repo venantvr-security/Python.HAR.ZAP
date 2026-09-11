@@ -80,6 +80,20 @@ class PatternEnricher:
                 })
         return self._add('mass_assignment', patterns)
 
+    def record_hidden_params(self, findings: List) -> int:
+        """Réinjecte les paramètres cachés actifs comme payloads `name=value`."""
+        if not self.active:
+            return 0
+        patterns = []
+        for f in findings:
+            for entry in getattr(f, 'active_params', []) or []:
+                patterns.append({
+                    'name': entry.get('name'),
+                    'values': [entry.get('value')],
+                    'reason': entry.get('reason', ''),
+                })
+        return self._add('hidden_params', patterns)
+
     def flush(self) -> Dict[str, str]:
         """Persiste la session et pousse les wordlists vers l'export ZAP."""
         if not self.active:
