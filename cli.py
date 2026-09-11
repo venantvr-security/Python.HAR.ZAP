@@ -167,6 +167,11 @@ Examples:
     diag_parser.add_argument('--adaptive', action='store_true',
                              help='Run adaptive closed-loop attacks (IDOR/mass-assignment/hidden-params) '
                                   'and enrich payload patterns (PatternStore + ZAP export)')
+    diag_parser.add_argument('--baseline',
+                             help='Security-regression gate: JSON baseline of known findings; '
+                                  'exit 1 on any NEW finding vs this baseline')
+    diag_parser.add_argument('--update-baseline', action='store_true',
+                             help='Write current findings as the new --baseline (accepts current state)')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -746,6 +751,34 @@ def run_advanced(args):
     return 0
 
 
+def _run_regression_gate(all_findings, adaptive_result, args, report):
+    """Compare les findings au baseline et échoue sur du nouveau. Écrit le verdict
+    dans le rapport et met à jour le baseline si --update-baseline."""
+    from modules.regression_gate import (
+        RegressionGate, normalize_diag_findings, normalize_adaptive)
+
+    findings = normalize_diag_findings(all_findings) + normalize_adaptive(adaptive_result)
+    gate = RegressionGate(args.baseline)
+    result = gate.evaluate(findings, update=getattr(args, 'update_baseline', False),
+                           meta={'target': args.target})
+
+    s = result.summary()
+    if result.baseline_updated:
+        print(f"\n[GATE] Baseline updated: {args.baseline} "
+              f"({len(result.unchanged) + len(result.new)} signatures)")
+    else:
+        print(f"\n[GATE] vs {args.baseline} — new: {s['new']} | fixed: {s['fixed']} | "
+              f"unchanged: {s['unchanged']} -> {'PASS' if result.passed else 'FAIL'}")
+        for n in result.new:
+            print(f"  NEW  {n.get('severity', ''):<8} {n['signature']}")
+        for sig in result.fixed:
+            print(f"  FIXED         {sig}")
+
+    report['regression_gate'] = {**s, 'new_signatures': [n['signature'] for n in result.new],
+                                 'fixed_signatures': result.fixed}
+    return result
+
+
 def _run_adaptive_campaign(har_data, config, args, zap_client=None):
     """Lance la campagne adaptative avec des exécuteurs HTTP réels et enrichit
     les patterns payloads. Retourne le résumé (aussi ajouté au rapport JSON).
@@ -812,7 +845,7 @@ def _run_adaptive_campaign(har_data, config, args, zap_client=None):
     print(f"[ADAPTIVE] Patterns enriched: {s['patterns_enriched']}")
     if result.exported:
         print(f"[ADAPTIVE] ZAP wordlists updated: {', '.join(sorted(result.exported))}")
-    return s
+    return result
 
 
 def _diag_findings_to_alerts(all_findings):
@@ -1033,9 +1066,18 @@ def run_diagnose(args):
 
         # Adaptive closed-loop attacks + payload pattern enrichment.
         # Attaques via le proxy ZAP quand il est disponible (sinon requests direct).
+        adaptive_result = None
         if getattr(args, 'adaptive', False):
-            report['adaptive'] = _run_adaptive_campaign(har_data, config, args,
-                                                        zap_client=zap_client)
+            adaptive_result = _run_adaptive_campaign(har_data, config, args,
+                                                     zap_client=zap_client)
+            report['adaptive'] = adaptive_result.summary()
+            with open(json_path, 'w') as f:
+                json.dump(report, f, indent=2)
+
+        # Security-regression gate: fail only on findings NEW vs the baseline.
+        gate_result = None
+        if getattr(args, 'baseline', None):
+            gate_result = _run_regression_gate(all_findings, adaptive_result, args, report)
             with open(json_path, 'w') as f:
                 json.dump(report, f, indent=2)
 
@@ -1047,6 +1089,12 @@ def run_diagnose(args):
                       f"{'available' if ai_classifier.available else 'offline (no key)'}")
             render_owasp('api-2023', _diag_findings_to_alerts(all_findings),
                          config.get('owasp', {}), enricher=ai_classifier)
+
+        # Regression gate verdict (exit non-zero on a NEW finding).
+        if gate_result is not None and not gate_result.passed:
+            print(f"\nFAILED: regression gate — {len(gate_result.new)} new finding(s) "
+                  f"vs baseline {args.baseline}")
+            return 1
 
         # Fail-fast check
         if args.fail_fast:
