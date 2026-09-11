@@ -943,12 +943,26 @@ def run_diagnose(args):
         # Passive Analysis
         print("[5/6] Passive Analysis...")
         from modules.passive_analysis import PassiveAnalysisOrchestrator
-        passive = PassiveAnalysisOrchestrator(har_data, config)
-        passive_results = passive.run_all()
-        passive_issues = passive_results.get('total_issues', 0)
+        passive = PassiveAnalysisOrchestrator(har_data)
+        passive.run_all_checks()
+
+        # Adjudication anti-faux-positifs (LLM si clé, sinon heuristiques offline).
+        fp_stats = None
+        if getattr(args, 'ai', False):
+            from modules.llm.fp_adjudicator import FalsePositiveAdjudicator
+            from modules.llm.adaptive_idor import client_from_config
+            adjudicator = FalsePositiveAdjudicator(client_from_config(config))
+            fp_stats = passive.adjudicate_false_positives(adjudicator)
+            print(f"  [AI] FP adjudication ({fp_stats['source']}): "
+                  f"reviewed {fp_stats['reviewed']}, filtered {fp_stats['filtered_false_positives']}")
+
+        passive_summary = passive.generate_summary()
+        passive_issues = passive_summary.get('total_issues', 0)
         adv_results['passive'] = passive_issues
-        for issue in passive_results.get('security_headers', {}).get('missing', []):
-            all_findings.append({'source': 'passive', 'risk': 'Low', 'name': f'Missing Header: {issue}', 'url': args.target})
+        for issue in passive.results.get('headers', []):
+            if getattr(issue, 'category', '') == 'Missing Security Header':
+                all_findings.append({'source': 'passive', 'risk': 'Low',
+                                     'name': issue.title, 'url': args.target})
         print(f"  Passive Issues: {passive_issues}")
 
         # Summary
@@ -972,6 +986,8 @@ def run_diagnose(args):
             'breakdown': adv_results,
             'findings': all_findings
         }
+        if fp_stats is not None:
+            report['passive_fp_adjudication'] = fp_stats
 
         # Save JSON
         json_path = Path(args.output) / 'diagnostic_report.json'

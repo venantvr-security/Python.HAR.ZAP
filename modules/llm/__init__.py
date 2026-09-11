@@ -14,6 +14,7 @@ from .adaptive_mass_assignment import AdaptiveMassAssignmentLoop, MAFinding
 from .pattern_enricher import PatternEnricher
 from .adaptive_hidden_params import AdaptiveHiddenParamsLoop, HPFinding
 from .adaptive_campaign import AdaptiveCampaign, CampaignResult
+from .fp_adjudicator import FalsePositiveAdjudicator, FPVerdict
 
 # Submodules
 from . import prompts
@@ -47,6 +48,8 @@ __all__ = [
     'HPFinding',
     'AdaptiveCampaign',
     'CampaignResult',
+    'FalsePositiveAdjudicator',
+    'FPVerdict',
     'prompts',
     'strategies',
 ]
