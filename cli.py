@@ -746,11 +746,14 @@ def run_advanced(args):
     return 0
 
 
-def _run_adaptive_campaign(har_data, config, args):
+def _run_adaptive_campaign(har_data, config, args, zap_client=None):
     """Lance la campagne adaptative avec des exécuteurs HTTP réels et enrichit
-    les patterns payloads. Retourne le résumé (aussi ajouté au rapport JSON)."""
+    les patterns payloads. Retourne le résumé (aussi ajouté au rapport JSON).
+
+    Les attaques passent par le proxy ZAP quand un client ZAP est disponible
+    (elles sont alors tracées, proxyfiées et vues par le passif ZAP) ; sinon on
+    se rabat sur `requests` en direct."""
     from urllib.parse import urlparse
-    import requests
     from modules.llm.adaptive_campaign import AdaptiveCampaign
     from modules.llm.pattern_enricher import PatternEnricher
     from modules.llm.adaptive_idor import client_from_config
@@ -760,28 +763,45 @@ def _run_adaptive_campaign(har_data, config, args):
     # avec le contexte du testeur (contexte offensif autorisé).
     auth = IDORDetector.extract_auth_tokens(har_data) or {}
 
-    def http_get(url, method='GET'):
-        try:
-            r = requests.request(method, url, headers=auth, timeout=10,
-                                 verify=False, allow_redirects=False)
-            return {'status': r.status_code, 'content_length': len(r.content),
-                    'body': r.text[:2000]}
-        except Exception:
-            return {'status': 0, 'content_length': 0, 'body': ''}
+    if zap_client is not None:
+        transport = 'ZAP proxy'
 
-    def http_write(url, method, payload):
-        try:
-            r = requests.request(method, url, headers=auth, json=payload, timeout=10,
-                                 verify=False, allow_redirects=False)
-            return {'status': r.status_code, 'body': r.text[:2000]}
-        except Exception:
-            return {'status': 0, 'body': ''}
+        def http_get(url, method='GET'):
+            r = zap_client.request(method, url, headers=auth, follow_redirects=False)
+            return {'status': r.status_code, 'content_length': len(r.content or b''),
+                    'body': (r.text or '')[:2000]}
+
+        def http_write(url, method, payload):
+            r = zap_client.request(method, url, headers=auth, json_data=payload,
+                                   follow_redirects=False)
+            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
+    else:
+        transport = 'direct requests'
+        import requests
+
+        def http_get(url, method='GET'):
+            try:
+                r = requests.request(method, url, headers=auth, timeout=10,
+                                     verify=False, allow_redirects=False)
+                return {'status': r.status_code, 'content_length': len(r.content),
+                        'body': r.text[:2000]}
+            except Exception:
+                return {'status': 0, 'content_length': 0, 'body': ''}
+
+        def http_write(url, method, payload):
+            try:
+                r = requests.request(method, url, headers=auth, json=payload, timeout=10,
+                                     verify=False, allow_redirects=False)
+                return {'status': r.status_code, 'body': r.text[:2000]}
+            except Exception:
+                return {'status': 0, 'body': ''}
 
     client = client_from_config(config)
     domain = urlparse(args.target).netloc or 'unknown'
     enricher = PatternEnricher.for_run(domain=domain, base_path='./patterns')
 
-    print(f"\n[ADAPTIVE] LLM: {'on' if client else 'offline heuristics'} | "
+    print(f"\n[ADAPTIVE] transport: {transport} | "
+          f"LLM: {'on' if client else 'offline heuristics'} | "
           f"pattern store: {'active' if enricher.active else 'inactive'}")
     result = AdaptiveCampaign(config, client=client, enricher=enricher).run(
         har_data, http_get, http_write)
@@ -1012,8 +1032,10 @@ def run_diagnose(args):
         print(f"\nReports: {args.output}/diagnostic_report.*")
 
         # Adaptive closed-loop attacks + payload pattern enrichment.
+        # Attaques via le proxy ZAP quand il est disponible (sinon requests direct).
         if getattr(args, 'adaptive', False):
-            report['adaptive'] = _run_adaptive_campaign(har_data, config, args)
+            report['adaptive'] = _run_adaptive_campaign(har_data, config, args,
+                                                        zap_client=zap_client)
             with open(json_path, 'w') as f:
                 json.dump(report, f, indent=2)
 
