@@ -12,6 +12,7 @@ Quand tu écris du code ou de la documentation, privilégie la clarté pédagogi
 
 1. **Accents français obligatoires** sur tout texte en français (commentaires, docstrings, messages UI, logs, docs) : `été`, `exécuté`, `éléments`, `configuré`, `récupéré`, `déjà`, `après`, `précédent`, etc. Jamais `ete`, `execute`, `elements`, etc.
 
+2. **Diagrammes en Mermaid, jamais en ASCII** : tout schéma (flux, architecture, séquence) s'écrit dans un bloc ```mermaid, jamais en art ASCII (pas de `+---+`, `-->` dessinés à la main, arborescences en caractères). Exemple :
 
    ```mermaid
    graph LR
