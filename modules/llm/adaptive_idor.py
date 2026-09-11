@@ -54,6 +54,9 @@ class IDORFinding:
     verdict: Optional[IDORVerdict] = None
     rounds: int = 0
     tried: List[str] = field(default_factory=list)
+    # Tous les identifiants confirmés en fuite : c'est ce vocabulaire découvert
+    # que l'on réinjecte dans le PatternStore / export ZAP (mutations idor).
+    leaks: List[str] = field(default_factory=list)
 
     @property
     def vulnerable(self) -> bool:
@@ -103,6 +106,7 @@ class AdaptiveIDORLoop:
         tried = {original}
         candidates = self._initial_candidates(original)
         best: Optional[IDORFinding] = None
+        leaks: List[str] = []
 
         for rnd in range(1, self.max_rounds + 1):
             history: List = []
@@ -117,10 +121,14 @@ class AdaptiveIDORLoop:
                 history.append((obs, verdict))
                 finding.tried.append(cid)
 
+                if verdict.is_leak:
+                    leaks.append(cid)
                 if verdict.is_leak and (best is None or verdict.confidence > best.verdict.confidence):
                     best = IDORFinding(target['url'], obs, verdict, rnd, list(finding.tried))
                 if verdict.is_leak and verdict.confidence >= self.confidence_stop:
                     best.rounds = rnd
+                    best.tried = list(finding.tried)
+                    best.leaks = list(leaks)
                     logger.info("idor_confirmed", url=target['url'], round=rnd,
                                 confidence=verdict.confidence, source=verdict.source)
                     return best
@@ -129,6 +137,7 @@ class AdaptiveIDORLoop:
 
         if best is not None:
             best.tried = list(finding.tried)
+            best.leaks = list(leaks)
             best.rounds = self.max_rounds
             return best
         finding.rounds = self.max_rounds
