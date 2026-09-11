@@ -1,0 +1,284 @@
+<title>Autonomous API Pentester</title>
+<meta name="description" content="Product case for HAR-ZAP: the killer app is an adaptive, self-improving API pentester that finds BOLA from a recorded session — in CI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#F4F2EE; --surface:#FBFAF8; --surface-2:#EDEAE3; --ink:#1B1A17;
+    --muted:#726C61; --line:#E1DCD2; --accent:#C8461E; --accent-2:#A8321A;
+    --accent-soft:#F3E1D7; --teal:#2C7A70; --amber:#9A6B12;
+    --shadow:0 1px 2px rgba(27,26,23,.05), 0 8px 24px rgba(27,26,23,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#141310; --surface:#1C1B16; --surface-2:#232118; --ink:#EDE9E0;
+      --muted:#A39A88; --line:#2E2B22; --accent:#E8643A; --accent-2:#E0704F;
+      --accent-soft:#33241C; --teal:#54B4A7; --amber:#C9A24A;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#141310; --surface:#1C1B16; --surface-2:#232118; --ink:#EDE9E0;
+    --muted:#A39A88; --line:#2E2B22; --accent:#E8643A; --accent-2:#E0704F;
+    --accent-soft:#33241C; --teal:#54B4A7; --amber:#C9A24A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:920px; margin:0 auto; padding-inline:24px; padding-block:0}
+  @media(max-width:520px){.wrap{padding-inline:18px}}
+
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+  .eyebrow{
+    font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); font-weight:600;
+  }
+  h1,h2,h3{font-family:"Sora",sans-serif; text-wrap:balance; margin:0; line-height:1.08}
+  h1{font-size:clamp(2.1rem,6vw,3.4rem); font-weight:800; letter-spacing:-.02em}
+  h2{font-size:clamp(1.4rem,3.4vw,1.9rem); font-weight:700; letter-spacing:-.01em}
+  h3{font-size:1.06rem; font-weight:600}
+  p{margin:0}
+  a{color:var(--accent); text-underline-offset:3px}
+
+  /* ---- header ---- */
+  header{border-bottom:1px solid var(--line); background:
+    linear-gradient(180deg, var(--surface), var(--bg));}
+  .head-inner{padding-block:52px 44px; display:flex; flex-direction:column; gap:22px}
+  .brandline{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+  .logo{
+    font-family:"Sora",sans-serif; font-weight:800; letter-spacing:-.03em; font-size:1.05rem;
+    display:inline-flex; align-items:center; gap:9px;
+  }
+  .logo .dot{width:11px; height:11px; border-radius:3px; background:var(--accent);
+    box-shadow:0 0 0 4px var(--accent-soft)}
+  .tag{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted);
+    border:1px solid var(--line); border-radius:999px; padding:3px 10px}
+  .lede{font-size:clamp(1.05rem,2.3vw,1.28rem); color:var(--ink); max-width:40ch; line-height:1.45}
+  .lede b{color:var(--accent); font-weight:600}
+  .cmd{
+    font-family:"IBM Plex Mono",monospace; font-size:13.5px; color:var(--ink);
+    background:var(--surface-2); border:1px solid var(--line); border-radius:10px;
+    padding:13px 15px; overflow-x:auto; white-space:nowrap;
+  }
+  .cmd .p{color:var(--muted)} .cmd .f{color:var(--accent); font-weight:600}
+
+  section{padding-block:44px; border-bottom:1px solid var(--line)}
+  .kicker{display:flex; align-items:baseline; gap:14px; margin-bottom:20px}
+  .kicker .n{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted)}
+
+  .thesis{font-size:clamp(1.5rem,3.6vw,2.15rem); font-family:"Sora",sans-serif;
+    font-weight:700; line-height:1.22; letter-spacing:-.01em; text-wrap:balance}
+  .thesis .hl{color:var(--accent)}
+  .sub{color:var(--muted); margin-top:16px; max-width:64ch}
+
+  /* poles */
+  .poles{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:8px}
+  @media(max-width:560px){.poles{grid-template-columns:1fr}}
+  .pole{border:1px solid var(--line); border-radius:12px; padding:16px 18px; background:var(--surface)}
+  .pole .h{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:7px}
+  .pole p{font-size:.95rem; color:var(--ink)}
+  .pole.win{border-color:var(--accent); background:var(--accent-soft)}
+  .pole.win .h{color:var(--accent)}
+
+  /* use case steps */
+  .steps{display:grid; gap:2px; margin-top:6px; border:1px solid var(--line);
+    border-radius:12px; overflow:hidden; background:var(--line)}
+  .step{background:var(--surface); padding:16px 18px; display:grid;
+    grid-template-columns:auto 1fr; gap:16px; align-items:start}
+  .step .s{font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--accent);
+    font-size:13px; padding-top:2px; min-width:2.2em}
+  .step b{font-weight:600}
+  .step .d{color:var(--muted); font-size:.92rem; margin-top:2px}
+  .step .api{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--teal);
+    border:1px solid var(--line); border-radius:6px; padding:1px 7px; margin-left:8px; white-space:nowrap}
+
+  /* flywheel */
+  .flow{background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    padding:22px; box-shadow:var(--shadow); overflow-x:auto}
+  .flow svg{display:block; width:100%; min-width:620px; height:auto}
+
+  /* bets */
+  .bets{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+  @media(max-width:720px){.bets{grid-template-columns:1fr}}
+  .bet{border:1px solid var(--line); border-radius:12px; padding:18px; background:var(--surface);
+    display:flex; flex-direction:column; gap:9px}
+  .bet .t{display:flex; align-items:center; gap:9px}
+  .bet .mk{width:8px; height:24px; border-radius:3px; background:var(--accent)}
+  .bet:nth-child(2) .mk{background:var(--teal)} .bet:nth-child(3) .mk{background:var(--amber)}
+  .bet p{font-size:.93rem; color:var(--muted)}
+  .bet .why{font-size:.86rem; color:var(--ink); border-top:1px dashed var(--line); padding-top:9px}
+  .bet .why span{color:var(--accent); font-weight:600; font-family:"IBM Plex Mono",monospace; font-size:.8rem}
+
+  /* cut list */
+  .cut{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  @media(max-width:560px){.cut{grid-template-columns:1fr}}
+  .cut .row{display:flex; gap:11px; align-items:baseline; font-size:.95rem}
+  .cut .mark{font-family:"IBM Plex Mono",monospace; color:var(--accent); font-weight:600}
+
+  /* next */
+  .next{background:var(--surface-2); border:1px solid var(--line); border-radius:14px; padding:24px}
+  .next h2{margin-bottom:6px}
+  .next ol{margin:14px 0 0; padding-left:0; list-style:none; display:grid; gap:10px; counter-reset:n}
+  .next li{display:grid; grid-template-columns:auto 1fr; gap:13px; align-items:baseline}
+  .next li::before{counter-increment:n; content:counter(n,decimal-leading-zero);
+    font-family:"IBM Plex Mono",monospace; color:var(--accent); font-size:12px; font-weight:600}
+  .next li b{font-weight:600}
+  .next li .d{color:var(--muted)}
+
+  footer{padding-block:34px; color:var(--muted); font-size:.85rem;
+    font-family:"IBM Plex Mono",monospace; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
+</style>
+
+<header>
+  <div class="wrap head-inner">
+    <div class="brandline">
+      <span class="logo"><span class="dot"></span>HAR-ZAP</span>
+      <span class="tag">product case · v2 line (llm)</span>
+    </div>
+    <h1>The autonomous<br>API pentester</h1>
+    <p class="lede">Record a session. Drop the <b>HAR</b>. Get the vulns scanners miss —
+      <b>BOLA, BFLA, mass&nbsp;assignment</b> — proven, in&nbsp;CI. No proxy setup, no auth scripting.</p>
+    <div class="cmd mono"><span class="p">$</span> har-zap diagnose traffic.har <span class="f">--target</span> https://api.acme.com <span class="f">--adaptive</span> <span class="f">--owasp-api</span> <span class="f">--fail-fast</span></div>
+  </div>
+</header>
+
+<section class="wrap">
+  <div class="kicker"><span class="eyebrow">The thesis</span><span class="n mono">why it wins</span></div>
+  <p class="thesis">The market forces a choice between <span class="hl">scanners that are cheap but blind</span>
+    to authorization bugs, and <span class="hl">pentesters who find them but don't scale.</span>
+    HAR-ZAP is the third thing: an attacker that reasons — and gets sharper every run.</p>
+  <p class="sub">Active scanners (ZAP, Burp) fire fixed payloads and choke on the OWASP API top risks,
+    which are logic, not injection. Manual pentest catches them, at $X/day, once a quarter.
+    HAR-ZAP automates the reasoning — adaptive, LLM-guided, and self-improving — from traffic a
+    developer already has.</p>
+  <div class="poles">
+    <div class="pole"><div class="h">Automated scanners</div><p>Config-heavy, noisy, blind to BOLA/BFLA. Same payloads every time.</p></div>
+    <div class="pole"><div class="h">Manual pentest</div><p>Finds logic bugs — but slow, expensive, and doesn't run in your pipeline.</p></div>
+    <div class="pole win" style="grid-column:1/-1"><div class="h">HAR-ZAP · the wedge</div><p>Finds authorization bugs autonomously from a HAR, proves them with a replayable request, and runs as a CI gate — learning your API as it goes.</p></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="kicker"><span class="eyebrow">The killer use case</span><span class="n mono">the demo that sells</span></div>
+  <h2>Prove BOLA from two logins — in the pipeline</h2>
+  <p class="sub" style="margin-bottom:22px">The single most valuable, hardest-to-automate finding in APIs, delivered as a build gate.</p>
+  <div class="steps">
+    <div class="step"><span class="s">01</span><div><b>Two recorded sessions</b> — user A and user B, straight from the browser's Save-as-HAR.<div class="d">No proxy, no auth flow to reverse-engineer. The real, authenticated traffic is the input.</div></div></div>
+    <div class="step"><span class="s">02</span><div><b>The adaptive loop enumerates</b> object ids and adjudicates each response<span class="api">API1 · BOLA</span><div class="d">Not a fixed list: a leaking neighbor widens the search; the LLM rules cross-user leak vs. error page, killing false positives.</div></div></div>
+    <div class="step"><span class="s">03</span><div><b>It proves it</b> — "user A read user B's invoice", with the exact replayable request.<div class="d">Evidence a developer believes and can reproduce in one paste. Trust is the adoption lever.</div></div></div>
+    <div class="step"><span class="s">04</span><div><b>The build fails</b> on a new authorization gap — and only a new one.<div class="d"><span class="mono">--fail-fast</span> turns security into a regression test. This is what makes it recurring, not one-off.</div></div></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="kicker"><span class="eyebrow">The engine · the moat</span><span class="n mono">why it compounds</span></div>
+  <h2>A closed loop that learns your API</h2>
+  <p class="sub" style="margin-bottom:22px">Every other scanner starts each run from zero. HAR-ZAP's attacks flow <em>through</em> ZAP
+    and what they discover flows <em>back</em> into ZAP's fuzzers — so the next run, and every teammate's run, starts smarter.</p>
+  <div class="flow">
+    <svg viewBox="0 0 640 220" role="img" aria-label="HAR-ZAP learning flywheel: HAR to ZAP proxy to adaptive loop to findings to pattern store, looping back into the next run.">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="art" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--teal)"></path>
+        </marker>
+      </defs>
+      <!-- top row nodes -->
+      <g font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600">
+        <g>
+          <rect x="8" y="40" width="96" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line)"></rect>
+          <text x="56" y="63" text-anchor="middle" fill="var(--ink)">HAR</text>
+          <text x="56" y="79" text-anchor="middle" fill="var(--muted)" font-size="10">recorded</text>
+        </g>
+        <g>
+          <rect x="140" y="40" width="110" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line)"></rect>
+          <text x="195" y="63" text-anchor="middle" fill="var(--ink)">ZAP proxy</text>
+          <text x="195" y="79" text-anchor="middle" fill="var(--muted)" font-size="10">every request</text>
+        </g>
+        <g>
+          <rect x="286" y="30" width="150" height="72" rx="9" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+          <text x="361" y="55" text-anchor="middle" fill="var(--accent)" font-weight="700">adaptive loop</text>
+          <text x="361" y="72" text-anchor="middle" fill="var(--ink)" font-size="10">interpret ⇄ refine</text>
+          <text x="361" y="88" text-anchor="middle" fill="var(--muted)" font-size="10">LLM-guided</text>
+        </g>
+        <g>
+          <rect x="472" y="40" width="120" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line)"></rect>
+          <text x="532" y="60" text-anchor="middle" fill="var(--ink)">findings</text>
+          <text x="532" y="77" text-anchor="middle" fill="var(--muted)" font-size="10">proven + fixed</text>
+        </g>
+        <!-- arrows top -->
+        <line x1="106" y1="66" x2="136" y2="66" stroke="var(--accent)" stroke-width="2" marker-end="url(#ar)"></line>
+        <line x1="252" y1="66" x2="282" y2="66" stroke="var(--accent)" stroke-width="2" marker-end="url(#ar)"></line>
+        <line x1="438" y1="66" x2="468" y2="66" stroke="var(--accent)" stroke-width="2" marker-end="url(#ar)"></line>
+      </g>
+      <!-- store node bottom -->
+      <g font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600">
+        <rect x="196" y="150" width="248" height="50" rx="9" fill="var(--surface-2)" stroke="var(--teal)"></rect>
+        <text x="320" y="171" text-anchor="middle" fill="var(--teal)" font-weight="700">Pattern store → ZAP fuzzer wordlists</text>
+        <text x="320" y="188" text-anchor="middle" fill="var(--muted)" font-size="10">leaking ids · accepted fields · live params</text>
+      </g>
+      <!-- findings down to store -->
+      <path d="M532,92 L532,175 L446,175" fill="none" stroke="var(--teal)" stroke-width="2" marker-end="url(#art)"></path>
+      <!-- store back up into loop (the flywheel) -->
+      <path d="M196,175 L120,175 L120,120 Q120,104 168,88 L284,70" fill="none" stroke="var(--teal)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#art)"></path>
+      <text x="126" y="140" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--teal)">next run, smarter</text>
+    </svg>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="kicker"><span class="eyebrow">Three bets to make it a must-have</span><span class="n mono">product roadmap</span></div>
+  <div class="bets">
+    <div class="bet">
+      <div class="t"><span class="mk"></span><h3>Security-regression gate</h3></div>
+      <p>Diff runs: "3 new endpoints, 1 new BOLA, 2 fixed." Fail the build only on new risk.</p>
+      <div class="why"><span>why</span> Recurring &amp; sticky — this is how you enter a pipeline and stay.</div>
+    </div>
+    <div class="bet">
+      <div class="t"><span class="mk"></span><h3>The learning flywheel</h3></div>
+      <p>A per-org pattern library that compounds: each run makes the tool better on <em>your</em> API.</p>
+      <div class="why"><span>why</span> A moat competitors can't copy — it's your traffic, not their rules.</div>
+    </div>
+    <div class="bet">
+      <div class="t"><span class="mk"></span><h3>Proof, not alerts</h3></div>
+      <p>Every finding ships a replayable request + a plain-language impact and fix, LLM-written.</p>
+      <div class="why"><span>why</span> Developers fix what they can reproduce; noise gets muted and churns.</div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="kicker"><span class="eyebrow">What we don't build</span><span class="n mono">focus is a feature</span></div>
+  <div class="cut">
+    <div class="row"><span class="mark">—</span><div><b>Yet another web-app scanner.</b> ZAP's active scan already exists; we orchestrate it, we don't reimplement it.</div></div>
+    <div class="row"><span class="mark">—</span><div><b>A third web UI.</b> CLI is the CI surface, Streamlit the human one. The FastAPI front stays deprecated.</div></div>
+    <div class="row"><span class="mark">—</span><div><b>Payload vocabularies for logic tests.</b> Race/business-logic are detectors, not wordlists — kept out of the enrichment loop by design.</div></div>
+    <div class="row"><span class="mark">—</span><div><b>An LLM in the hot path with no offline path.</b> Every AI step degrades to deterministic heuristics — CI never depends on a key.</div></div>
+  </div>
+</section>
+
+<section class="wrap" style="border-bottom:none">
+  <div class="next">
+    <h2>The next build</h2>
+    <p class="sub" style="margin-top:8px">One move turns "a powerful engine" into "a product a team adopts."</p>
+    <ol>
+      <li><b>The CI diff gate.</b><span class="d"> Persist each run's findings, compare to the last, and fail only on <em>new</em> authorization gaps. The flywheel already stores state — this reads it.</span></li>
+      <li><b>Findings-first output.</b><span class="d"> One severity-sorted view: each finding = impact · proof (curl) · fix · OWASP-API id. Replace the raw multi-tab dump.</span></li>
+      <li><b>A one-command quickstart.</b><span class="d"> <span class="mono">har-zap init</span> → sample HAR → green/red gate in under five minutes. The demo is the pitch.</span></li>
+    </ol>
+  </div>
+</section>
+
+<footer class="wrap">
+  <span>HAR-ZAP · autonomous API pentester</span>
+  <span>OWASP API Top 10 · adaptive · ZAP-native</span>
+</footer>

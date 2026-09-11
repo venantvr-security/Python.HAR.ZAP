@@ -44,7 +44,8 @@ HAR = {"log": {"entries": [
 def test_adaptive_routes_through_zap(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # isole ./patterns
     zap = _FakeZap()
-    summary = cli._run_adaptive_campaign(HAR, {}, _Args(), zap_client=zap)
+    result = cli._run_adaptive_campaign(HAR, {}, _Args(), zap_client=zap)
+    summary = result.summary()
     # Tout le trafic est passé par le client ZAP.
     assert len(zap.calls) > 0
     assert any(c[0] == 'write' for c in zap.calls)  # mass assignment via ZAP
