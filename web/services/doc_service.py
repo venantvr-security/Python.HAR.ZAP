@@ -18,7 +18,7 @@ class DocService:
             'title': 'Bienvenue',
             'file': 'GETTING_STARTED.md',
             'section': None,
-            'description': 'Introduction au DAST Security Platform'
+            'description': 'Introduction à HAR-ZAP'
         },
         {
             'id': 'install',

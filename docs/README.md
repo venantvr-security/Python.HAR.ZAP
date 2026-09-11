@@ -1,6 +1,6 @@
 # HAR-ZAP Documentation
 
-> Professional DAST Security Platform for Pentesters and Security Engineers
+> HAR-ZAP — professional DAST platform for pentesters and security engineers
 
 [← Back to repo root](../README.md) · [QUICKSTART](../QUICKSTART.md) · [PENTEST walkthrough](../PENTEST.md) · [CLAUDE charter](../CLAUDE.md)
 

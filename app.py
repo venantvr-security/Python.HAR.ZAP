@@ -54,7 +54,7 @@ from modules.ui_advanced import (
 from modules.ui_guide import render_guide_tab
 
 st.set_page_config(
-    page_title="DAST Security Platform",
+    page_title="HAR-ZAP",
     page_icon="🛡️",
     layout="wide"
 )

@@ -108,6 +108,182 @@ OWASP_TOP_10_2021 = {
     },
 }
 
+# OWASP API Security Top 10 2023.
+# `native_types` are this tool's own finding tags (IDOR / Red Team / passive),
+# so native findings map here without depending on ZAP plugin ids.
+API_TOP_10_2023 = {
+    'API1:2023': {
+        'name': 'Broken Object Level Authorization',
+        'description': 'APIs expose object identifiers, letting a user access objects belonging to others (BOLA/IDOR).',
+        'cwes': [284, 285, 639, 863],
+        'zap_alerts': [],
+        'keywords': ['idor', 'bola', 'object level', 'access control', 'authorization', 'forced browsing'],
+        'native_types': ['idor'],
+    },
+    'API2:2023': {
+        'name': 'Broken Authentication',
+        'description': 'Weak or missing authentication lets attackers assume other identities or reach authenticated endpoints.',
+        'cwes': [287, 288, 290, 294, 306, 307, 345, 384, 521, 613, 798],
+        'zap_alerts': [],
+        'keywords': ['authentication', 'unauthenticated', 'jwt', 'token', 'session', 'credential', 'login'],
+        'native_types': ['unauth_replay', 'broken_auth', 'weak_token'],
+    },
+    'API3:2023': {
+        'name': 'Broken Object Property Level Authorization',
+        'description': 'Mass assignment or excessive data exposure at the property level (merges 2019 A03 + A06).',
+        'cwes': [200, 213, 915],
+        'zap_alerts': [],
+        'keywords': ['mass assignment', 'excessive data', 'data exposure', 'data leakage', 'property'],
+        'native_types': ['mass_assignment', 'sensitive_data'],
+    },
+    'API4:2023': {
+        'name': 'Unrestricted Resource Consumption',
+        'description': 'Missing rate limiting / quotas allow resource exhaustion and cost/DoS abuse.',
+        'cwes': [400, 770, 799],
+        'zap_alerts': [],
+        'keywords': ['rate limit', 'throttl', 'resource consumption', 'quota', 'flood'],
+        'native_types': ['no_rate_limit'],
+    },
+    'API5:2023': {
+        'name': 'Broken Function Level Authorization',
+        'description': 'Users reach admin/privileged functions or hidden modes they should not (BFLA).',
+        'cwes': [285, 862, 863],
+        'zap_alerts': [],
+        'keywords': ['function level', 'admin', 'privilege', 'hidden param', 'debug', 'bfla'],
+        'native_types': ['hidden_params', 'bfla'],
+    },
+    'API6:2023': {
+        'name': 'Unrestricted Access to Sensitive Business Flows',
+        'description': 'Business flows (transfer, coupon, checkout) abusable without limits, incl. race conditions.',
+        'cwes': [362, 367, 799, 841],
+        'zap_alerts': [],
+        'keywords': ['business flow', 'race condition', 'toctou', 'automation abuse'],
+        'native_types': ['race_condition'],
+    },
+    'API7:2023': {
+        'name': 'Server-Side Request Forgery',
+        'description': 'API fetches a remote resource from a user-supplied URL without validation.',
+        'cwes': [918],
+        'zap_alerts': ['40046'],
+        'keywords': ['ssrf', 'server-side request', 'url fetch', 'remote resource'],
+        'native_types': ['ssrf'],
+    },
+    'API8:2023': {
+        'name': 'Security Misconfiguration',
+        'description': 'Missing hardening: security headers, CORS, verbose errors, insecure cookies, defaults.',
+        'cwes': [16, 209, 611, 614, 776, 942, 1004],
+        'zap_alerts': ['10009', '10015', '10017', '10019', '10020', '10021', '10023',
+                       '10035', '10036', '10037', '10038', '10098', '90022', '90033'],
+        'keywords': ['header', 'cors', 'csp', 'x-frame', 'hsts', 'cookie', 'misconfig',
+                     'default', 'debug', 'verbose', 'error message', 'stack trace', 'disclosure'],
+        'native_types': ['security_misconfig', 'info_disclosure'],
+    },
+    'API9:2023': {
+        'name': 'Improper Inventory Management',
+        'description': 'Undocumented, deprecated or shadow endpoints and unmanaged API versions.',
+        'cwes': [1059],
+        'zap_alerts': [],
+        'keywords': ['inventory', 'deprecated', 'shadow', 'undocumented', 'version', 'debug endpoint'],
+        'native_types': ['shadow_endpoint'],
+    },
+    'API10:2023': {
+        'name': 'Unsafe Consumption of APIs',
+        'description': 'Blindly trusting data from third-party/upstream APIs without validation.',
+        'cwes': [20, 74, 918],
+        'zap_alerts': [],
+        'keywords': ['third-party', 'upstream', 'unsafe consumption', 'downstream'],
+        'native_types': ['unsafe_consumption'],
+    },
+}
+
+# Selectable catalogs by version string.
+CATALOGS = {
+    '2021': OWASP_TOP_10_2021,
+    'api-2023': API_TOP_10_2023,
+}
+
+# Native severity -> normalized risk bucket used by the mapper.
+_RISK_FROM_SEVERITY = {
+    'CRITICAL': 'High', 'HIGH': 'High', 'MEDIUM': 'Medium',
+    'LOW': 'Low', 'INFO': 'Informational', 'INFORMATIONAL': 'Informational',
+}
+
+
+def _risk_from_confidence(confidence: float) -> str:
+    if confidence >= 0.8:
+        return 'High'
+    if confidence >= 0.5:
+        return 'Medium'
+    return 'Low'
+
+
+def normalize_findings(idor_results=None, redteam_results=None,
+                       passive_issues=None) -> List[Dict]:
+    """Adapter: turn native findings into normalized alert dicts the mapper reads.
+
+    Each alert dict carries: alert, risk, cweid, native_type, url, confidence.
+    Only vulnerable/positive findings are emitted.
+    """
+    from .redteam_attacks import AttackType
+
+    redteam_native = {
+        AttackType.UNAUTH_REPLAY: 'unauth_replay',
+        AttackType.BROKEN_AUTH: 'broken_auth',
+        AttackType.MASS_ASSIGNMENT: 'mass_assignment',
+        AttackType.HIDDEN_PARAMS: 'hidden_params',
+        AttackType.RACE_CONDITION: 'race_condition',
+    }
+    passive_native = {
+        'Missing Security Header': 'security_misconfig',
+        'Weak Security Header': 'security_misconfig',
+        'Insecure Cookie': 'security_misconfig',
+        'Information Disclosure': 'info_disclosure',
+        'Data Leakage': 'sensitive_data',
+        'Weak Token': 'weak_token',
+    }
+
+    alerts: List[Dict] = []
+
+    for r in idor_results or []:
+        status = getattr(getattr(r, 'status', None), 'value', getattr(r, 'status', ''))
+        if str(status).lower() not in ('vulnerable', 'confirmed'):
+            continue
+        conf = getattr(r, 'confidence', 1.0) or 1.0
+        alerts.append({
+            'alert': 'IDOR / Broken Object Level Authorization',
+            'risk': _risk_from_confidence(conf),
+            'cweid': 639,
+            'native_type': 'idor',
+            'url': getattr(r, 'url', ''),
+            'confidence': conf,
+        })
+
+    for r in redteam_results or []:
+        if not getattr(r, 'vulnerable', False):
+            continue
+        conf = getattr(r, 'confidence', 0.5) or 0.5
+        alerts.append({
+            'alert': getattr(r.attack_type, 'value', str(r.attack_type)),
+            'risk': _risk_from_confidence(conf),
+            'cweid': 0,
+            'native_type': redteam_native.get(r.attack_type, ''),
+            'url': getattr(r, 'url', ''),
+            'confidence': conf,
+        })
+
+    for issue in passive_issues or []:
+        category = getattr(issue, 'category', '')
+        alerts.append({
+            'alert': getattr(issue, 'title', category),
+            'risk': _RISK_FROM_SEVERITY.get(str(getattr(issue, 'severity', '')).upper(), 'Low'),
+            'cweid': 0,
+            'native_type': passive_native.get(category, 'security_misconfig'),
+            'url': getattr(issue, 'evidence', {}).get('url', '') if isinstance(getattr(issue, 'evidence', {}), dict) else '',
+            'confidence': 1.0,
+        })
+
+    return alerts
+
 
 @dataclass
 class OWASPMapping:
@@ -131,10 +307,17 @@ class ComplianceReport:
 class OWASPMapper:
     """Map ZAP alerts to OWASP Top 10 categories."""
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, enricher=None):
         self.config = config or {}
         self.version = self.config.get('version', '2021')
+        if self.version not in CATALOGS:
+            raise ValueError(
+                f"Unknown OWASP version '{self.version}'. Choose one of: {', '.join(CATALOGS)}"
+            )
+        self.catalog = CATALOGS[self.version]
         self.fail_on_categories = self.config.get('fail_on_categories', [])
+        # Optional classifier (e.g. OWASPLLMClassifier) for alerts the rules miss.
+        self.enricher = enricher
 
     def map_alerts(self, alerts: List[Dict]) -> ComplianceReport:
         """Map ZAP alerts to OWASP Top 10 categories."""
@@ -143,7 +326,7 @@ class OWASPMapper:
         report = ComplianceReport(version=self.version)
 
         # Initialize all categories
-        for cat_id, cat_info in OWASP_TOP_10_2021.items():
+        for cat_id, cat_info in self.catalog.items():
             report.mappings[cat_id] = OWASPMapping(
                 category=cat_id,
                 category_name=cat_info['name'],
@@ -153,6 +336,14 @@ class OWASPMapper:
         # Map each alert
         for alert in alerts:
             mapped = self._map_single_alert(alert)
+
+            if not mapped and self.enricher is not None and getattr(self.enricher, 'available', False):
+                # AI fallback: let the LLM place alerts the rules could not.
+                verdict = self.enricher.classify_owasp(
+                    alert, {cid: c['name'] for cid, c in self.catalog.items()})
+                if verdict:
+                    mapped = verdict['category']
+                    alert = {**alert, 'owasp_ai_reason': verdict.get('reason', '')}
 
             if mapped:
                 category = mapped
@@ -191,19 +382,26 @@ class OWASPMapper:
         except (ValueError, TypeError):
             cweid = 0
 
-        # First try: direct alert ID match
-        for cat_id, cat_info in OWASP_TOP_10_2021.items():
+        # First try: native finding type match
+        native_type = alert.get('native_type')
+        if native_type:
+            for cat_id, cat_info in self.catalog.items():
+                if native_type in cat_info.get('native_types', []):
+                    return cat_id
+
+        # Second try: direct alert ID match
+        for cat_id, cat_info in self.catalog.items():
             if alert_id in cat_info['zap_alerts']:
                 return cat_id
 
-        # Second try: CWE match
+        # Third try: CWE match
         if cweid:
-            for cat_id, cat_info in OWASP_TOP_10_2021.items():
+            for cat_id, cat_info in self.catalog.items():
                 if cweid in cat_info['cwes']:
                     return cat_id
 
-        # Third try: keyword match
-        for cat_id, cat_info in OWASP_TOP_10_2021.items():
+        # Fourth try: keyword match
+        for cat_id, cat_info in self.catalog.items():
             for keyword in cat_info['keywords']:
                 if keyword in alert_name:
                     return cat_id
@@ -235,7 +433,7 @@ class OWASPMapper:
                 total_score += mapping.score
                 categories_with_issues += 1
 
-        report.overall_score = total_score / len(OWASP_TOP_10_2021)
+        report.overall_score = total_score / len(self.catalog)
 
     def _check_compliance(self, report: ComplianceReport):
         """Check if scan passes compliance requirements."""
@@ -283,9 +481,9 @@ class OWASPMapper:
             return f"OWASP Top 10 {report.version} compliance: PASSED with score {report.overall_score:.1f}/100"
 
         failed_names = [
-            OWASP_TOP_10_2021[cat]['name']
+            self.catalog[cat]['name']
             for cat in report.failed_categories
-            if cat in OWASP_TOP_10_2021
+            if cat in self.catalog
         ]
 
         return (
@@ -355,10 +553,159 @@ class OWASPMapper:
                     'Use network segmentation',
                     'Do not send raw responses to clients'
                 ]
-            }
+            },
+            'API1:2023': {
+                'summary': 'Enforce object-level authorization (BOLA)',
+                'steps': [
+                    'Check the caller owns/has rights to every object id on every request',
+                    'Use random/unpredictable ids (UUID) instead of sequential ones',
+                    'Centralize authorization checks; never trust client-supplied ids',
+                ]
+            },
+            'API2:2023': {
+                'summary': 'Harden authentication',
+                'steps': [
+                    'Require auth on every non-public endpoint',
+                    'Validate JWT signature/alg/exp; reject alg=none',
+                    'Rate-limit and lock out credential-stuffing/brute-force',
+                ]
+            },
+            'API3:2023': {
+                'summary': 'Authorize object properties (BOPLA)',
+                'steps': [
+                    'Allowlist writable fields; reject unexpected properties (no blind bind)',
+                    'Return only the fields the caller is entitled to (no over-exposure)',
+                    'Validate request/response schemas',
+                ]
+            },
+            'API4:2023': {
+                'summary': 'Limit resource consumption',
+                'steps': [
+                    'Enforce rate limits, quotas and payload/size caps',
+                    'Set timeouts and pagination limits',
+                    'Alert on abnormal consumption',
+                ]
+            },
+            'API5:2023': {
+                'summary': 'Enforce function-level authorization (BFLA)',
+                'steps': [
+                    'Deny by default; grant admin/privileged functions explicitly by role',
+                    'Do not rely on hidden/undocumented endpoints for protection',
+                    'Test each function with a low-privileged and anonymous caller',
+                ]
+            },
+            'API6:2023': {
+                'summary': 'Protect sensitive business flows',
+                'steps': [
+                    'Add anti-automation on sensitive flows (transfer, checkout, coupon)',
+                    'Use idempotency keys / locks to prevent race conditions (TOCTOU)',
+                    'Detect and throttle scripted/abusive usage',
+                ]
+            },
+            'API7:2023': {
+                'summary': 'Prevent SSRF',
+                'steps': [
+                    'Validate and allowlist user-supplied URLs (scheme, host, port)',
+                    'Disable redirects; block internal/link-local ranges',
+                    'Never return raw upstream responses to the client',
+                ]
+            },
+            'API8:2023': {
+                'summary': 'Fix security misconfiguration',
+                'steps': [
+                    'Set security headers (HSTS, CSP, X-Content-Type-Options)',
+                    'Lock down CORS; secure cookies (Secure, HttpOnly, SameSite)',
+                    'Disable verbose errors/stack traces in production',
+                ]
+            },
+            'API9:2023': {
+                'summary': 'Manage API inventory',
+                'steps': [
+                    'Maintain an up-to-date inventory of hosts, endpoints and versions',
+                    'Retire deprecated/shadow endpoints; block debug/staging in prod',
+                    'Document every exposed API and its data classification',
+                ]
+            },
+            'API10:2023': {
+                'summary': 'Consume third-party APIs safely',
+                'steps': [
+                    'Validate and sanitize data received from upstream/third-party APIs',
+                    'Use TLS and allowlists for outbound API calls; disable blind redirects',
+                    'Do not blindly forward third-party responses to your clients',
+                ]
+            },
         }
 
         return remediations.get(category, {
             'summary': 'Review OWASP guidance for this category',
             'steps': ['Consult OWASP Top 10 documentation']
         })
+
+
+def _extract_json(raw):
+    """Best-effort JSON extraction from an LLM response (may wrap in ```json)."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.startswith('```'):
+        raw = raw.split('```', 2)[1]
+        if raw.startswith('json'):
+            raw = raw[4:]
+        raw = raw.strip('`').strip()
+    import json as _json
+    try:
+        return _json.loads(raw)
+    except ValueError:
+        for opener, closer in (('{', '}'), ('[', ']')):
+            start, end = raw.find(opener), raw.rfind(closer)
+            if start != -1 and end > start:
+                try:
+                    return _json.loads(raw[start:end + 1])
+                except ValueError:
+                    continue
+    return None
+
+
+class OWASPLLMClassifier:
+    """Classify OWASP-unmapped alerts with the shared modules.llm client.
+
+    A no-op when no API key/provider is configured, so scans stay green without
+    an LLM. Reuses the project's existing LLMClient rather than a parallel one.
+    """
+
+    def __init__(self, config: Optional[Dict] = None):
+        self._client = None
+        try:
+            from .llm import LLMClient  # lazy: module stays importable without the subsystem
+            self._client = LLMClient.from_config(config or {})
+        except Exception as e:  # missing key, missing subsystem, bad config
+            logger.info("owasp_llm_classifier_unavailable", reason=str(e))
+            self._client = None
+
+    @property
+    def available(self) -> bool:
+        return self._client is not None
+
+    def classify_owasp(self, alert: Dict, categories: Dict[str, str]) -> Optional[Dict]:
+        """Return {'category': id, 'reason': str} or None."""
+        if not self._client:
+            return None
+        import json as _json
+        keep = ('alert', 'name', 'risk', 'severity', 'native_type', 'url', 'cweid')
+        slim = {k: alert[k] for k in keep if k in alert}
+        prompt = (
+            "Map this security finding to exactly one category id from the list, "
+            'or null if none fits. Return JSON {"category": str|null, "reason": str}.\n'
+            f"Categories: {_json.dumps(categories)}\n"
+            f"Finding: {_json.dumps(slim)}"
+        )
+        try:
+            resp = self._client.complete(
+                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            data = _extract_json(getattr(resp, 'content', None))
+        except Exception as e:
+            logger.warning("owasp_llm_classify_failed", error=str(e))
+            return None
+        if isinstance(data, dict) and data.get('category') in categories:
+            return {'category': data['category'], 'reason': data.get('reason', '')}
+        return None

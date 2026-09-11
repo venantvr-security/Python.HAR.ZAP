@@ -1,17 +1,33 @@
-# DAST Security Platform
+# HAR-ZAP
 
-Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP orchestration, Red Team offensive testing, IDOR detection, and CI/CD integration.
+**Point your browser, record, drop the HAR — get an exploitable attack report.**
+No proxy setup, no auth scripting: HAR-ZAP replays your real, already-authenticated
+traffic through OWASP ZAP and its own Red Team / IDOR engines, then reports findings
+mapped to the OWASP API Security Top 10.
+
+## The one workflow
+
+1. **Record** your session in the browser (DevTools → Save as HAR).
+2. **Choose a profile** — Passive, Red Team, or IDOR (two logins).
+3. **Run** one command — `python cli.py diagnose traffic.har --target https://api.example.com --owasp-api`.
+4. **Read the report** — findings sorted by severity, each with proof, impact, fix and its OWASP tag.
+
+Built to run in CI/CD: one command, human-readable output, exit codes for gating
+(`--fail-fast`), SARIF/JUnit export.
+
+## Who it's for
+
+Pentesters and security engineers who already have the app in hand and want a verdict
+in minutes — plus a security-regression gate in the pipeline.
 
 > **Start here**: [QUICKSTART](QUICKSTART.md) — 5 min · [PENTEST walkthrough](PENTEST.md) — full scenario · [INNOVATION](docs/INNOVATION.md) — what's different · [HOWTO recipes](docs/HOWTO.md) · [Full docs index](docs/README.md)
 
 ## Branches
 
-| Branch | Description |
-|--------|-------------|
-| `master` | Stable release. Core DAST features, Red Team attacks, IDOR detection. |
-| `llm` | LLM integration (experimental). Domain-aware attack enrichment via Claude API. Single LLM call per HAR, session-scoped pattern persistence, ZAP fuzzer export. |
-
-> **Note**: Both branches are under active testing. Expect breaking changes.
+| Branch | Status |
+|--------|--------|
+| `llm` | **Active development line.** Full platform + LLM enrichment (domain-aware payloads, findings triage) and OWASP API Top 10. |
+| `master` | **Frozen** stable snapshot — core DAST features only, no new development. |
 
 ## Features
 
@@ -59,9 +75,12 @@ Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP or
 
 ### Interfaces
 
-- **Streamlit Web UI**: Self-explanatory dashboard with 9 specialized tabs
-- **CLI**: CI/CD-friendly with JUnit/SARIF export
-- **Legacy CLI**: Original orchestrator.py for backward compatibility
+This is a DAST built to run in CI/CD. Two supported surfaces:
+
+- **CLI** (`cli.py`): the CI/CD surface — one command per job, human-readable output, JUnit/SARIF export, exit codes for gating.
+- **Streamlit Web UI** (`app.py`): the single interactive surface for humans — trigger scans and read findings.
+
+> The FastAPI + static-JS front under `web/` is **deprecated** (duplicate of the Streamlit UI) and `orchestrator.py` is kept only for backward compatibility.
 
 ## Installation
 
@@ -106,6 +125,25 @@ python cli.py scan traffic.har --format sarif --output results.sarif
 # JUnit XML for Jenkins/GitLab
 python cli.py scan traffic.har --format junit --max-high 0 --max-medium 5
 ```
+
+### OWASP API Security Top 10 (2023)
+
+Map findings to the API Top 10 and gate the build. `--owasp-api` is available on `scan`, `idor` and `diagnose`:
+
+```bash
+# API Top 10 compliance from a scan (ZAP alerts)
+python cli.py scan traffic.har --owasp-api
+
+# BOLA (API1) report straight from two-session IDOR detection
+python cli.py idor --session-a user1.har --session-b user2.har --owasp-api
+
+# Full suite (Red Team + passive) mapped to the API Top 10
+python cli.py diagnose traffic.har --target https://api.example.com --owasp-api
+```
+
+Native findings (IDOR→API1 BOLA, mass assignment→API3 BOPLA, hidden params→API5 BFLA, race conditions→API6, headers/CORS/cookies→API8, JWT→API2) are mapped in addition to ZAP alerts. To fail CI on specific risks, set `owasp.fail_on_categories` with API ids (e.g. `API1:2023`) in `config.yaml`. The classic web Top 10 2021 stays available via `--owasp`.
+
+Add `--ai` (on `scan` or `diagnose`) to let the shared LLM (`modules.llm`, configured via the `llm` block + `.env` keys) classify alerts the rule-based mapper leaves unmapped. Without an API key it is a no-op, so CI stays green.
 
 ### Legacy CLI
 

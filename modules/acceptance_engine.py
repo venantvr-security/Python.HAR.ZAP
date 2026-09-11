@@ -256,7 +256,7 @@ class AcceptanceEngine:
                 {
                     "tool": {
                         "driver": {
-                            "name": "DAST Security Platform",
+                            "name": "HAR-ZAP",
                             "version": "1.0.0",
                             "informationUri": "https://github.com/yourusername/dast-platform"
                         }
