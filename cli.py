@@ -33,7 +33,7 @@ from modules.zap_scanner import ZAPScanner
 from modules.incremental_scanner import IncrementalScanner
 from modules.graphql_scanner import GraphQLScanner
 from modules.websocket_scanner import WebSocketScanner
-from modules.owasp_mapper import OWASPMapper
+from modules.owasp_mapper import OWASPMapper, normalize_findings
 from modules.notifications import NotificationManager, NotificationType
 from modules.utils import get_logger
 
@@ -88,7 +88,9 @@ Examples:
     scan_parser.add_argument('--incremental', action='store_true',
                              help='Skip already-scanned requests (uses local cache)')
     scan_parser.add_argument('--owasp', action='store_true',
-                             help='Include OWASP Top 10 compliance report')
+                             help='Include OWASP Top 10 2021 (web) compliance report')
+    scan_parser.add_argument('--owasp-api', action='store_true',
+                             help='Include OWASP API Security Top 10 2023 compliance report')
     scan_parser.add_argument('--graphql', action='store_true',
                              help='Enable GraphQL endpoint scanning')
     scan_parser.add_argument('--websocket', action='store_true',
@@ -133,6 +135,8 @@ Examples:
     idor_parser.add_argument('--workers', type=int, default=5, help='Parallel workers')
     idor_parser.add_argument('--fail-on-idor', action='store_true',
                              help='Exit code 1 if IDOR found')
+    idor_parser.add_argument('--owasp-api', action='store_true',
+                             help='Emit OWASP API Top 10 2023 report (BOLA / API1)')
     idor_parser.add_argument('--webhook', help='Webhook type: slack, teams, discord')
 
     # === CACHE COMMAND ===
@@ -154,6 +158,8 @@ Examples:
     diag_parser.add_argument('--fail-fast', action='store_true', help='Exit 1 on criteria fail')
     diag_parser.add_argument('--skip-zap', action='store_true', help='Skip ZAP active scan')
     diag_parser.add_argument('--skip-redteam', action='store_true', help='Skip red team attacks')
+    diag_parser.add_argument('--owasp-api', action='store_true',
+                             help='Emit OWASP API Top 10 2023 compliance report')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -203,6 +209,32 @@ Examples:
         return run_diagnose(args)
 
     return 0
+
+
+def render_owasp(version, alerts, owasp_cfg=None):
+    """Print a compact, human-readable OWASP compliance report. Returns the report dict."""
+    label = 'OWASP API Security Top 10 2023' if version == 'api-2023' else 'OWASP Top 10 2021'
+    cfg = dict(owasp_cfg or {})
+    cfg['version'] = version
+    mapper = OWASPMapper(cfg)
+    report = mapper.generate_report(mapper.map_alerts(alerts))
+
+    marks = {'PASS': '[ OK ]', 'WARN': '[WARN]', 'FAIL': '[FAIL]'}
+    hit = [(cid, c) for cid, c in report['categories'].items() if c['alerts_count']]
+
+    print(f"\n{'='*56}\n{label}")
+    print(f"Score: {report['overall_score']}/100  ->  {'PASS' if report['passed'] else 'FAIL'}")
+    print('='*56)
+    if not hit:
+        print("  No findings mapped to any category.")
+    for cid, c in hit:
+        print(f"  {marks.get(c['status'], '[ ?? ]')} {cid} {c['name']}: "
+              f"{c['alerts_count']} finding(s), score {c['score']}")
+    clean = len(report['categories']) - len(hit)
+    print(f"  Coverage: {len(hit)} category(ies) with findings, {clean} clean.")
+    if report['failed_categories']:
+        print(f"  Blocking: {', '.join(report['failed_categories'])}")
+    return report
 
 
 def run_scan(args):
@@ -347,12 +379,9 @@ def run_scan(args):
 
         # OWASP compliance
         if args.owasp:
-            owasp = OWASPMapper(config.get('owasp', {}))
-            compliance = owasp.map_alerts(alerts)
-            report = owasp.generate_report(compliance)
-            print(f"\n[OWASP] Score: {report['overall_score']}/100 - {'PASS' if report['passed'] else 'FAIL'}")
-            if report['failed_categories']:
-                print(f"  Failed: {', '.join(report['failed_categories'])}")
+            render_owasp('2021', alerts, config.get('owasp', {}))
+        if args.owasp_api:
+            render_owasp('api-2023', alerts, config.get('owasp', {}))
 
         # Console summary
         reporter.generate_console_report(alerts)
@@ -529,6 +558,10 @@ def run_idor(args):
 
         print(f"\nResults saved: {output_file}")
 
+        if getattr(args, 'owasp_api', False):
+            alerts = normalize_findings(idor_results=results)
+            render_owasp('api-2023', alerts, load_config().get('owasp', {}))
+
         if args.fail_on_idor and summary['vulnerable'] > 0:
             print("\nFAILED: IDOR vulnerabilities detected!")
             return 1
@@ -703,6 +736,36 @@ def run_advanced(args):
     return 0
 
 
+def _diag_findings_to_alerts(all_findings):
+    """Map diagnose's flat findings (source/name/risk) to normalized OWASP alerts."""
+    risk_norm = {'Critical': 'High', 'High': 'High', 'Medium': 'Medium',
+                 'Low': 'Low', 'Info': 'Informational', 'Informational': 'Informational'}
+    source_native = {
+        'jwt': 'broken_auth', 'cors': 'security_misconfig', 'cache': 'security_misconfig',
+        'smuggling': 'security_misconfig', 'passive': 'security_misconfig',
+    }
+    redteam_native = [
+        ('mass', 'mass_assignment'), ('unauth', 'unauth_replay'),
+        ('hidden', 'hidden_params'), ('race', 'race_condition'), ('auth', 'broken_auth'),
+    ]
+    alerts = []
+    for f in all_findings:
+        source = f.get('source', '')
+        name = (f.get('name') or f.get('alert') or '')
+        native = source_native.get(source, '')
+        if source == 'redteam':
+            low = name.lower()
+            native = next((nt for kw, nt in redteam_native if kw in low), '')
+        alerts.append({
+            'alert': name,
+            'risk': risk_norm.get(f.get('risk', 'Informational'), 'Informational'),
+            'cweid': f.get('cweid', 0),
+            'pluginId': f.get('pluginId', ''),
+            'native_type': native,
+        })
+    return alerts
+
+
 def run_diagnose(args):
     """Run full diagnostic attack suite.
 
@@ -872,6 +935,11 @@ def run_diagnose(args):
         print(f"Low: {low_count}")
         print(f"Total: {len(all_findings)}")
         print(f"\nReports: {args.output}/diagnostic_report.*")
+
+        # OWASP API Top 10 compliance from the full finding set
+        if getattr(args, 'owasp_api', False):
+            render_owasp('api-2023', _diag_findings_to_alerts(all_findings),
+                         config.get('owasp', {}))
 
         # Fail-fast check
         if args.fail_fast:

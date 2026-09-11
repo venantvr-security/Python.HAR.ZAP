@@ -206,3 +206,87 @@ class TestComplianceReport:
 
         assert report.passed is False
         assert len(report.failed_categories) == 2
+
+
+# --- OWASP API Security Top 10 2023 ---
+
+from modules.owasp_mapper import API_TOP_10_2023, CATALOGS, normalize_findings
+
+
+class TestAPITop10Catalog:
+    def test_ten_categories(self):
+        expected = [f'API{i}:2023' for i in range(1, 11)]
+        assert list(API_TOP_10_2023.keys()) == expected
+
+    def test_category_structure(self):
+        for cat in API_TOP_10_2023.values():
+            for key in ('name', 'description', 'cwes', 'zap_alerts', 'keywords', 'native_types'):
+                assert key in cat
+
+    def test_registered_in_catalogs(self):
+        assert CATALOGS['api-2023'] is API_TOP_10_2023
+        assert CATALOGS['2021'] is OWASP_TOP_10_2021
+
+
+class TestAPIMapper:
+    def test_unknown_version_rejected(self):
+        with pytest.raises(ValueError):
+            OWASPMapper({'version': 'bogus'})
+
+    def test_select_api_catalog(self):
+        mapper = OWASPMapper({'version': 'api-2023'})
+        assert mapper.catalog is API_TOP_10_2023
+
+    def test_native_type_maps_bola(self):
+        mapper = OWASPMapper({'version': 'api-2023'})
+        report = mapper.map_alerts([
+            {'alert': 'IDOR', 'risk': 'High', 'native_type': 'idor', 'cweid': 0}
+        ])
+        assert len(report.mappings['API1:2023'].alerts) == 1
+
+    def test_zap_ssrf_maps_api7(self):
+        mapper = OWASPMapper({'version': 'api-2023'})
+        report = mapper.map_alerts([
+            {'alert': 'SSRF', 'risk': 'High', 'pluginId': '40046', 'cweid': 918}
+        ])
+        assert len(report.mappings['API7:2023'].alerts) == 1
+
+    def test_report_version_and_remediation(self):
+        mapper = OWASPMapper({'version': 'api-2023'})
+        rep = mapper.generate_report(mapper.map_alerts([]))
+        assert rep['owasp_version'] == 'api-2023'
+        assert rep['passed'] is True
+        rem = mapper.get_remediation('API1:2023')
+        assert 'BOLA' in rem['summary'] or 'object' in rem['summary'].lower()
+
+    def test_fail_on_api_category(self):
+        mapper = OWASPMapper({'version': 'api-2023', 'fail_on_categories': ['API1:2023']})
+        report = mapper.map_alerts([
+            {'alert': 'IDOR', 'risk': 'Medium', 'native_type': 'idor', 'cweid': 0}
+        ])
+        assert report.passed is False
+        assert 'API1:2023' in report.failed_categories
+
+
+class TestNormalizeFindings:
+    def test_idor_only_vulnerable(self):
+        class S:
+            def __init__(self, v): self.value = v
+        class R:
+            def __init__(self, status): self.url = '/x'; self.status = S(status); self.confidence = 0.9
+        alerts = normalize_findings(idor_results=[R('vulnerable'), R('protected')])
+        assert len(alerts) == 1
+        assert alerts[0]['native_type'] == 'idor'
+
+    def test_redteam_and_passive(self):
+        from modules.redteam_attacks import AttackType, AttackResult
+        from modules.passive_analysis import SecurityIssue
+        rt = AttackResult(attack_type=AttackType.MASS_ASSIGNMENT, url='/o', method='POST',
+                          vulnerable=True, confidence=0.7, evidence={}, description='', remediation='')
+        rt_skip = AttackResult(attack_type=AttackType.HIDDEN_PARAMS, url='/h', method='GET',
+                               vulnerable=False, confidence=0.1, evidence={}, description='', remediation='')
+        pi = SecurityIssue(severity='HIGH', category='Insecure Cookie', title='Cookie missing Secure flag',
+                           description='', evidence={'url': '/'}, remediation='')
+        alerts = normalize_findings(redteam_results=[rt, rt_skip], passive_issues=[pi])
+        types = sorted(a['native_type'] for a in alerts)
+        assert types == ['mass_assignment', 'security_misconfig']

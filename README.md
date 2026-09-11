@@ -59,9 +59,12 @@ Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP or
 
 ### Interfaces
 
-- **Streamlit Web UI**: Self-explanatory dashboard with 9 specialized tabs
-- **CLI**: CI/CD-friendly with JUnit/SARIF export
-- **Legacy CLI**: Original orchestrator.py for backward compatibility
+This is a DAST built to run in CI/CD. Two supported surfaces:
+
+- **CLI** (`cli.py`): the CI/CD surface — one command per job, human-readable output, JUnit/SARIF export, exit codes for gating.
+- **Streamlit Web UI** (`app.py`): the single interactive surface for humans — trigger scans and read findings.
+
+> The FastAPI + static-JS front under `web/` is **deprecated** (duplicate of the Streamlit UI) and `orchestrator.py` is kept only for backward compatibility.
 
 ## Installation
 
@@ -106,6 +109,23 @@ python cli.py scan traffic.har --format sarif --output results.sarif
 # JUnit XML for Jenkins/GitLab
 python cli.py scan traffic.har --format junit --max-high 0 --max-medium 5
 ```
+
+### OWASP API Security Top 10 (2023)
+
+Map findings to the API Top 10 and gate the build. `--owasp-api` is available on `scan`, `idor` and `diagnose`:
+
+```bash
+# API Top 10 compliance from a scan (ZAP alerts)
+python cli.py scan traffic.har --owasp-api
+
+# BOLA (API1) report straight from two-session IDOR detection
+python cli.py idor --session-a user1.har --session-b user2.har --owasp-api
+
+# Full suite (Red Team + passive) mapped to the API Top 10
+python cli.py diagnose traffic.har --target https://api.example.com --owasp-api
+```
+
+Native findings (IDOR→API1 BOLA, mass assignment→API3 BOPLA, hidden params→API5 BFLA, race conditions→API6, headers/CORS/cookies→API8, JWT→API2) are mapped in addition to ZAP alerts. To fail CI on specific risks, set `owasp.fail_on_categories` with API ids (e.g. `API1:2023`) in `config.yaml`. The classic web Top 10 2021 stays available via `--owasp`.
 
 ### Legacy CLI
 

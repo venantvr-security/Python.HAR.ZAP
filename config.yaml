@@ -469,10 +469,15 @@ webhooks: []
 # =============================================================================
 owasp:
   enabled: true
+  # version: "2021" (web) or "api-2023" (OWASP API Security Top 10).
+  # CLI flags override per run: scan --owasp (2021), scan/idor/diagnose --owasp-api (api-2023).
   version: "2021"
   fail_on_categories:
     - "A01:2021"  # Broken Access Control
     - "A03:2021"  # Injection
+  # For api-2023 use API ids, e.g.:
+  #   - "API1:2023"  # Broken Object Level Authorization (BOLA)
+  #   - "API2:2023"  # Broken Authentication
 
 # =============================================================================
 # REPORTING
