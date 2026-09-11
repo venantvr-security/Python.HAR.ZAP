@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="HAR-ZAP",
-    description="DAST Security Platform",
+    description="HAR-ZAP — DAST security platform",
     version="2.0.0",
     lifespan=lifespan
 )

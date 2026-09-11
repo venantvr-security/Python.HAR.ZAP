@@ -4,7 +4,7 @@
     "name": "English"
   },
   "app": {
-    "title": "DAST Security Platform",
+    "title": "HAR-ZAP",
     "subtitle": "Automated Dynamic Application Security Testing with OWASP ZAP"
   },
   "lang_selector": {

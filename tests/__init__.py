@@ -1,1 +1,1 @@
-"""Test suite for DAST Security Platform"""
+"""Test suite for HAR-ZAP"""

@@ -1,17 +1,33 @@
-# DAST Security Platform
+# HAR-ZAP
 
-Enterprise-grade Dynamic Application Security Testing platform with OWASP ZAP orchestration, Red Team offensive testing, IDOR detection, and CI/CD integration.
+**Point your browser, record, drop the HAR — get an exploitable attack report.**
+No proxy setup, no auth scripting: HAR-ZAP replays your real, already-authenticated
+traffic through OWASP ZAP and its own Red Team / IDOR engines, then reports findings
+mapped to the OWASP API Security Top 10.
+
+## The one workflow
+
+1. **Record** your session in the browser (DevTools → Save as HAR).
+2. **Choose a profile** — Passive, Red Team, or IDOR (two logins).
+3. **Run** one command — `python cli.py diagnose traffic.har --target https://api.example.com --owasp-api`.
+4. **Read the report** — findings sorted by severity, each with proof, impact, fix and its OWASP tag.
+
+Built to run in CI/CD: one command, human-readable output, exit codes for gating
+(`--fail-fast`), SARIF/JUnit export.
+
+## Who it's for
+
+Pentesters and security engineers who already have the app in hand and want a verdict
+in minutes — plus a security-regression gate in the pipeline.
 
 > **Start here**: [QUICKSTART](QUICKSTART.md) — 5 min · [PENTEST walkthrough](PENTEST.md) — full scenario · [INNOVATION](docs/INNOVATION.md) — what's different · [HOWTO recipes](docs/HOWTO.md) · [Full docs index](docs/README.md)
 
 ## Branches
 
-| Branch | Description |
-|--------|-------------|
-| `master` | Stable release. Core DAST features, Red Team attacks, IDOR detection. |
-| `llm` | LLM integration (experimental). Domain-aware attack enrichment via Claude API. Single LLM call per HAR, session-scoped pattern persistence, ZAP fuzzer export. |
-
-> **Note**: Both branches are under active testing. Expect breaking changes.
+| Branch | Status |
+|--------|--------|
+| `llm` | **Active development line.** Full platform + LLM enrichment (domain-aware payloads, findings triage) and OWASP API Top 10. |
+| `master` | **Frozen** stable snapshot — core DAST features only, no new development. |
 
 ## Features
 
