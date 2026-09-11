@@ -9,6 +9,7 @@ from .context_extractor import HARContextExtractor, HARContext
 from .analyzer import LLMSecurityAnalyzer, SecurityPlan, AttackStrategy
 from .zap_integration import LLMZAPEnricher, DomainEnrichment, enrich_zap_from_har
 from .pattern_store import PatternStore, PatternSession, create_store
+from .adaptive_idor import AdaptiveIDORLoop, IDORFinding, IDORVerdict, IDORObservation, client_from_config
 
 # Submodules
 from . import prompts
@@ -30,6 +31,11 @@ __all__ = [
     'PatternStore',
     'PatternSession',
     'create_store',
+    'AdaptiveIDORLoop',
+    'IDORFinding',
+    'IDORVerdict',
+    'IDORObservation',
+    'client_from_config',
     'prompts',
     'strategies',
 ]
