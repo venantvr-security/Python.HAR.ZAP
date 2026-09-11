@@ -33,7 +33,7 @@ from modules.zap_scanner import ZAPScanner
 from modules.incremental_scanner import IncrementalScanner
 from modules.graphql_scanner import GraphQLScanner
 from modules.websocket_scanner import WebSocketScanner
-from modules.owasp_mapper import OWASPMapper, normalize_findings
+from modules.owasp_mapper import OWASPMapper, normalize_findings, OWASPLLMClassifier
 from modules.notifications import NotificationManager, NotificationType
 from modules.utils import get_logger
 
@@ -91,6 +91,8 @@ Examples:
                              help='Include OWASP Top 10 2021 (web) compliance report')
     scan_parser.add_argument('--owasp-api', action='store_true',
                              help='Include OWASP API Security Top 10 2023 compliance report')
+    scan_parser.add_argument('--ai', action='store_true',
+                             help='Use the LLM (modules.llm) to classify OWASP-unmapped alerts')
     scan_parser.add_argument('--graphql', action='store_true',
                              help='Enable GraphQL endpoint scanning')
     scan_parser.add_argument('--websocket', action='store_true',
@@ -160,6 +162,8 @@ Examples:
     diag_parser.add_argument('--skip-redteam', action='store_true', help='Skip red team attacks')
     diag_parser.add_argument('--owasp-api', action='store_true',
                              help='Emit OWASP API Top 10 2023 compliance report')
+    diag_parser.add_argument('--ai', action='store_true',
+                             help='Use the LLM (modules.llm) to classify OWASP-unmapped findings')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -211,12 +215,12 @@ Examples:
     return 0
 
 
-def render_owasp(version, alerts, owasp_cfg=None):
+def render_owasp(version, alerts, owasp_cfg=None, enricher=None):
     """Print a compact, human-readable OWASP compliance report. Returns the report dict."""
     label = 'OWASP API Security Top 10 2023' if version == 'api-2023' else 'OWASP Top 10 2021'
     cfg = dict(owasp_cfg or {})
     cfg['version'] = version
-    mapper = OWASPMapper(cfg)
+    mapper = OWASPMapper(cfg, enricher=enricher)
     report = mapper.generate_report(mapper.map_alerts(alerts))
 
     marks = {'PASS': '[ OK ]', 'WARN': '[WARN]', 'FAIL': '[FAIL]'}
@@ -378,10 +382,13 @@ def run_scan(args):
             print(f"  {fmt}: {path}")
 
         # OWASP compliance
+        ai_classifier = OWASPLLMClassifier(config) if getattr(args, 'ai', False) else None
+        if ai_classifier is not None:
+            print(f"[AI] LLM classification: {'available' if ai_classifier.available else 'offline (no key)'}")
         if args.owasp:
-            render_owasp('2021', alerts, config.get('owasp', {}))
+            render_owasp('2021', alerts, config.get('owasp', {}), enricher=ai_classifier)
         if args.owasp_api:
-            render_owasp('api-2023', alerts, config.get('owasp', {}))
+            render_owasp('api-2023', alerts, config.get('owasp', {}), enricher=ai_classifier)
 
         # Console summary
         reporter.generate_console_report(alerts)
@@ -938,8 +945,12 @@ def run_diagnose(args):
 
         # OWASP API Top 10 compliance from the full finding set
         if getattr(args, 'owasp_api', False):
+            ai_classifier = OWASPLLMClassifier(config) if getattr(args, 'ai', False) else None
+            if ai_classifier is not None:
+                print(f"[AI] LLM classification: "
+                      f"{'available' if ai_classifier.available else 'offline (no key)'}")
             render_owasp('api-2023', _diag_findings_to_alerts(all_findings),
-                         config.get('owasp', {}))
+                         config.get('owasp', {}), enricher=ai_classifier)
 
         # Fail-fast check
         if args.fail_fast:

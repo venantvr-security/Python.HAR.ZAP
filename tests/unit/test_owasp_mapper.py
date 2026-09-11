@@ -290,3 +290,95 @@ class TestNormalizeFindings:
         alerts = normalize_findings(redteam_results=[rt, rt_skip], passive_issues=[pi])
         types = sorted(a['native_type'] for a in alerts)
         assert types == ['mass_assignment', 'security_misconfig']
+
+
+# --- AI fallback (reusing modules.llm via OWASPLLMClassifier) ---
+
+from modules.owasp_mapper import OWASPLLMClassifier, _extract_json
+
+
+class _FakeClassifier:
+    """Minimal enricher stub matching the OWASPMapper contract."""
+    def __init__(self, verdict, available=True):
+        self._verdict = verdict
+        self.available = available
+
+    def classify_owasp(self, alert, categories):
+        return self._verdict
+
+
+class TestExtractJson:
+    def test_plain(self):
+        assert _extract_json('{"a": 1}') == {'a': 1}
+
+    def test_fenced(self):
+        assert _extract_json('```json\n{"category": "API5:2023"}\n```') == {'category': 'API5:2023'}
+
+    def test_none(self):
+        assert _extract_json('nonsense') is None
+
+
+class TestMapperAIFallback:
+    def _unmappable(self):
+        return {'alert': 'zzz qqq blorp', 'risk': 'High', 'cweid': 0}
+
+    def test_rules_only_leaves_unmapped(self):
+        report = OWASPMapper({'version': 'api-2023'}).map_alerts([self._unmappable()])
+        assert len(report.unmapped_alerts) == 1
+
+    def test_ai_fallback_places_alert(self):
+        enricher = _FakeClassifier({'category': 'API5:2023', 'reason': 'admin fn'})
+        report = OWASPMapper({'version': 'api-2023'}, enricher=enricher).map_alerts([self._unmappable()])
+        assert len(report.unmapped_alerts) == 0
+        placed = report.mappings['API5:2023'].alerts
+        assert len(placed) == 1 and placed[0]['owasp_ai_reason'] == 'admin fn'
+
+    def test_unavailable_enricher_is_ignored(self):
+        enricher = _FakeClassifier({'category': 'API5:2023'}, available=False)
+        report = OWASPMapper({'version': 'api-2023'}, enricher=enricher).map_alerts([self._unmappable()])
+        assert len(report.unmapped_alerts) == 1
+
+    def test_ai_does_not_override_rule_match(self):
+        enricher = _FakeClassifier({'category': 'API5:2023', 'reason': 'x'})
+        # SSRF maps by pluginId to API7 via rules; AI must not be consulted.
+        alert = {'alert': 'SSRF', 'risk': 'High', 'pluginId': '40046', 'cweid': 918}
+        report = OWASPMapper({'version': 'api-2023'}, enricher=enricher).map_alerts([alert])
+        assert len(report.mappings['API7:2023'].alerts) == 1
+        assert len(report.mappings['API5:2023'].alerts) == 0
+
+
+class TestOWASPLLMClassifier:
+    def test_offline_unavailable(self, monkeypatch):
+        monkeypatch.delenv('HARZAP_LLM_API_KEY', raising=False)
+        monkeypatch.delenv('HARZAP_GEMINI_API_KEY', raising=False)
+        clf = OWASPLLMClassifier({'llm': {'provider': 'anthropic'}})
+        assert clf.available is False
+        assert clf.classify_owasp({'alert': 'x'}, {'API1:2023': 'BOLA'}) is None
+
+    def test_available_classifies(self, monkeypatch):
+        clf = OWASPLLMClassifier({'llm': {'provider': 'anthropic'}})
+
+        class _Resp:
+            content = '{"category": "API1:2023", "reason": "bola"}'
+
+        class _Client:
+            def complete(self, prompt, system=None):
+                return _Resp()
+
+        clf._client = _Client()
+        assert clf.available is True
+        out = clf.classify_owasp({'alert': 'x'}, {'API1:2023': 'BOLA'})
+        assert out == {'category': 'API1:2023', 'reason': 'bola'}
+
+    def test_rejects_unknown_category(self):
+        clf = OWASPLLMClassifier({})
+
+        class _Resp:
+            content = '{"category": "NOPE"}'
+
+        class _Client:
+            def complete(self, prompt, system=None):
+                return _Resp()
+
+        clf._client = _Client()
+        assert clf.classify_owasp({'alert': 'x'}, {'API1:2023': 'BOLA'}) is None

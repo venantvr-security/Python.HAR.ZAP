@@ -127,6 +127,8 @@ python cli.py diagnose traffic.har --target https://api.example.com --owasp-api
 
 Native findings (IDOR→API1 BOLA, mass assignment→API3 BOPLA, hidden params→API5 BFLA, race conditions→API6, headers/CORS/cookies→API8, JWT→API2) are mapped in addition to ZAP alerts. To fail CI on specific risks, set `owasp.fail_on_categories` with API ids (e.g. `API1:2023`) in `config.yaml`. The classic web Top 10 2021 stays available via `--owasp`.
 
+Add `--ai` (on `scan` or `diagnose`) to let the shared LLM (`modules.llm`, configured via the `llm` block + `.env` keys) classify alerts the rule-based mapper leaves unmapped. Without an API key it is a no-op, so CI stays green.
+
 ### Legacy CLI
 
 ```bash

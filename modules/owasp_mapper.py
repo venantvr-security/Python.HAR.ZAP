@@ -307,7 +307,7 @@ class ComplianceReport:
 class OWASPMapper:
     """Map ZAP alerts to OWASP Top 10 categories."""
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, enricher=None):
         self.config = config or {}
         self.version = self.config.get('version', '2021')
         if self.version not in CATALOGS:
@@ -316,6 +316,8 @@ class OWASPMapper:
             )
         self.catalog = CATALOGS[self.version]
         self.fail_on_categories = self.config.get('fail_on_categories', [])
+        # Optional classifier (e.g. OWASPLLMClassifier) for alerts the rules miss.
+        self.enricher = enricher
 
     def map_alerts(self, alerts: List[Dict]) -> ComplianceReport:
         """Map ZAP alerts to OWASP Top 10 categories."""
@@ -334,6 +336,14 @@ class OWASPMapper:
         # Map each alert
         for alert in alerts:
             mapped = self._map_single_alert(alert)
+
+            if not mapped and self.enricher is not None and getattr(self.enricher, 'available', False):
+                # AI fallback: let the LLM place alerts the rules could not.
+                verdict = self.enricher.classify_owasp(
+                    alert, {cid: c['name'] for cid, c in self.catalog.items()})
+                if verdict:
+                    mapped = verdict['category']
+                    alert = {**alert, 'owasp_ai_reason': verdict.get('reason', '')}
 
             if mapped:
                 category = mapped
@@ -630,3 +640,72 @@ class OWASPMapper:
             'summary': 'Review OWASP guidance for this category',
             'steps': ['Consult OWASP Top 10 documentation']
         })
+
+
+def _extract_json(raw):
+    """Best-effort JSON extraction from an LLM response (may wrap in ```json)."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.startswith('```'):
+        raw = raw.split('```', 2)[1]
+        if raw.startswith('json'):
+            raw = raw[4:]
+        raw = raw.strip('`').strip()
+    import json as _json
+    try:
+        return _json.loads(raw)
+    except ValueError:
+        for opener, closer in (('{', '}'), ('[', ']')):
+            start, end = raw.find(opener), raw.rfind(closer)
+            if start != -1 and end > start:
+                try:
+                    return _json.loads(raw[start:end + 1])
+                except ValueError:
+                    continue
+    return None
+
+
+class OWASPLLMClassifier:
+    """Classify OWASP-unmapped alerts with the shared modules.llm client.
+
+    A no-op when no API key/provider is configured, so scans stay green without
+    an LLM. Reuses the project's existing LLMClient rather than a parallel one.
+    """
+
+    def __init__(self, config: Optional[Dict] = None):
+        self._client = None
+        try:
+            from .llm import LLMClient  # lazy: module stays importable without the subsystem
+            self._client = LLMClient.from_config(config or {})
+        except Exception as e:  # missing key, missing subsystem, bad config
+            logger.info("owasp_llm_classifier_unavailable", reason=str(e))
+            self._client = None
+
+    @property
+    def available(self) -> bool:
+        return self._client is not None
+
+    def classify_owasp(self, alert: Dict, categories: Dict[str, str]) -> Optional[Dict]:
+        """Return {'category': id, 'reason': str} or None."""
+        if not self._client:
+            return None
+        import json as _json
+        keep = ('alert', 'name', 'risk', 'severity', 'native_type', 'url', 'cweid')
+        slim = {k: alert[k] for k in keep if k in alert}
+        prompt = (
+            "Map this security finding to exactly one category id from the list, "
+            'or null if none fits. Return JSON {"category": str|null, "reason": str}.\n'
+            f"Categories: {_json.dumps(categories)}\n"
+            f"Finding: {_json.dumps(slim)}"
+        )
+        try:
+            resp = self._client.complete(
+                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            data = _extract_json(getattr(resp, 'content', None))
+        except Exception as e:
+            logger.warning("owasp_llm_classify_failed", error=str(e))
+            return None
+        if isinstance(data, dict) and data.get('category') in categories:
+            return {'category': data['category'], 'reason': data.get('reason', '')}
+        return None
