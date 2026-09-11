@@ -1047,12 +1047,8 @@ def run_diagnose(args):
         with open(json_path, 'w') as f:
             json.dump(report, f, indent=2)
 
-        # Save HTML if requested
-        if 'html' in args.format:
-            html_path = Path(args.output) / 'diagnostic_report.html'
-            html_content = generate_diagnostic_html(report)
-            with open(html_path, 'w') as f:
-                f.write(html_content)
+        # (HTML report is now generated findings-first, after the adaptive pass,
+        # so it includes the high-value BOLA/BFLA findings.)
 
         print(f"\n{'='*50}")
         print(f"DIAGNOSTIC COMPLETE - {args.target}")
@@ -1080,6 +1076,20 @@ def run_diagnose(args):
             gate_result = _run_regression_gate(all_findings, adaptive_result, args, report)
             with open(json_path, 'w') as f:
                 json.dump(report, f, indent=2)
+
+        # Findings-first output: one severity-sorted view (impact · proof · fix · OWASP),
+        # built after the adaptive pass so it includes the high-value BOLA/BFLA findings.
+        from modules.findings import build_findings, render_cli, render_html
+        unified = build_findings(all_findings, adaptive_result, target=args.target)
+        report['findings'] = [f.to_dict() for f in unified]
+        with open(json_path, 'w') as f:
+            json.dump(report, f, indent=2)
+        print(render_cli(unified))
+        if 'html' in args.format:
+            html_path = Path(args.output) / 'diagnostic_report.html'
+            html_path.write_text(render_html(unified, {'target': args.target,
+                                                       'har_file': args.har_file}))
+            print(f"Findings-first report: {html_path}")
 
         # OWASP API Top 10 compliance from the full finding set
         if getattr(args, 'owasp_api', False):
