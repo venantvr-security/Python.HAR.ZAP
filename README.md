@@ -92,6 +92,8 @@ the CLI.
 
 ![HAR-ZAP — HAR upload & scan configuration](docs/assets/streamlit-upload.png)
 
+More screens — Red Team, IDOR, Passive Scan — in the [UI tour](docs/UI.md).
+
 ## Observability (Grafana)
 
 Findings and request telemetry ship to a Loki + Prometheus + Grafana stack, with a
