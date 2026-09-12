@@ -190,5 +190,5 @@ python cli.py scan updated.har --incremental
 |-------|-------------|
 | [Configuration](guides/CONFIGURATION.md) | Customize settings |
 | [Payloads](guides/PAYLOADS.md) | Custom attack payloads |
-| [Scanning Guide](guides/SCANNING.md) | Advanced scanning |
+| [Advanced Attacks](guides/ADVANCED_ATTACKS.md) | JWT / CORS / cache / smuggling |
 | [CLI Reference](api/CLI.md) | All commands and options |

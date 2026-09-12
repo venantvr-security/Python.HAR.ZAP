@@ -29,6 +29,59 @@ in minutes — plus a security-regression gate in the pipeline.
 | `llm` | **Active development line.** Full platform + LLM enrichment (domain-aware payloads, findings triage) and OWASP API Top 10. |
 | `master` | **Frozen** stable snapshot — core DAST features only, no new development. |
 
+## Scenarios
+
+Three concrete things HAR-ZAP finds that a generic scanner misses — because the
+OWASP API Top 10 is mostly business logic and authorization, not injection.
+
+### 1. A user reads another user's data (BOLA — API1)
+
+You record two logins (a normal user and, say, an admin) and run the access matrix:
+
+```bash
+python cli.py matrix --anon --role user=user.har --role admin=admin.har --fail-on-violation
+```
+
+HAR-ZAP builds a *role × endpoint* grid. Each endpoint's "floor" is the
+lowest-privilege role that legitimately uses it; if a role **below** that floor
+gets a 2xx, that's a broken authorization boundary. It reports, with a replayable
+curl, e.g. *"user reaches `GET /v1/admin/config` (requires admin)"* — the classic
+BOLA/BFLA that scanners can't reason about because it needs to compare roles.
+
+### 2. Checkout without paying, or a coupon replayed (Business flows — API6)
+
+From one authenticated HAR of a purchase flow:
+
+```bash
+python cli.py diagnose shop.har --target https://api.shop.com --business-flow --ai
+```
+
+HAR-ZAP reconstructs the multi-step flow (cart → pay → confirm) and **actively
+tries the abuses**: reach `confirm` without `pay` (state-skip), send a negative
+`amount`/`quantity` (value manipulation), replay a one-shot `coupon/redeem` N
+times — then adjudicates whether the server accepted each. The LLM reconstructs
+the state machine; without a key, deterministic heuristics take over.
+
+### 3. Fail CI only on a *new* vulnerability (Regression gate)
+
+Security as a build gate that doesn't cry wolf on already-known issues:
+
+```bash
+# once, to accept the current state as the baseline
+python cli.py diagnose traffic.har --target https://api.acme.com --adaptive \
+    --update-baseline --baseline .harzap/baseline.json
+
+# on every later run — exit 1 only if a NEW authorization gap appears
+python cli.py diagnose traffic.har --target https://api.acme.com --adaptive \
+    --baseline .harzap/baseline.json
+```
+
+Findings are matched on an id-insensitive signature, so a BOLA on `/users/{id}`
+is one risk, not one per enumerated id — re-runs don't churn, and the build turns
+red only on genuinely new exposure. Add `--ai-record run.json` once, then
+`--ai-replay run.json` to re-run the exact AI-assisted assessment offline, with no
+API calls and no key.
+
 ## Features
 
 ### Core Capabilities
