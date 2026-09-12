@@ -48,3 +48,22 @@ class TestAuth:
         har = {"log": {"entries": [{"request": {"url": "https://x/a",
                "headers": [{"name": "Authorization", "value": f"Bearer {tok}"}]}}]}}
         assert any('without expiration' in f.title for f in probe_auth(har))
+
+
+class TestRateLimitConcurrent:
+    def test_concurrent_burst_counts_all(self):
+        import threading
+        n = {'c': 0}; lock = threading.Lock()
+        def srv(url, method='GET'):
+            with lock: n['c'] += 1
+            return {'status': 200}
+        f = probe_rate_limit(srv, 'https://x/a', burst=12, max_workers=6)
+        assert n['c'] == 12 and f is not None and f.category == 'API4'
+
+    def test_concurrent_throttle_no_finding(self):
+        import itertools, threading
+        seq = itertools.chain([200]*4, itertools.repeat(429)); lock = threading.Lock()
+        def srv(url, method='GET'):
+            with lock: s = next(seq)
+            return {'status': s}
+        assert probe_rate_limit(srv, 'https://x/a', burst=10) is None

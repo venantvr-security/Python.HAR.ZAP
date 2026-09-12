@@ -47,15 +47,17 @@ class ProbeFinding:
 # API4 — Unrestricted Resource Consumption (rate limiting)
 # =============================================================================
 def probe_rate_limit(execute_fn: Callable[[str, str], Dict], url: str,
-                     method: str = 'GET', burst: int = 20) -> Optional[ProbeFinding]:
-    """Tire `burst` requêtes ; absence totale de throttling (429/503) = API4.
-
+                     method: str = 'GET', burst: int = 20,
+                     max_workers: int = 10) -> Optional[ProbeFinding]:
+    """Tire `burst` requêtes EN PARALLÈLE ; absence totale de throttling (429/503)
+    = API4. Le burst concurrent est à la fois plus réaliste (le throttling se
+    déclenche sous charge simultanée) et bien plus rapide que du séquentiel.
     Déterministe : on compte les statuts, aucun modèle.
     """
-    statuses = []
-    for _ in range(burst):
-        r = execute_fn(url, method) or {}
-        statuses.append(int(r.get('status', 0)))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(max_workers, burst)) as ex:
+        statuses = [int((r or {}).get('status', 0))
+                    for r in ex.map(lambda _: execute_fn(url, method) or {}, range(burst))]
     throttled = sum(1 for s in statuses if s in (429, 503))
     ok = sum(1 for s in statuses if 200 <= s < 300)
     if ok >= burst and throttled == 0:

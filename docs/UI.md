@@ -24,3 +24,7 @@ Non-invasive checks — security headers, sensitive-data leaks, token entropy.
 ## Findings-first report
 Severity-sorted, each finding with impact, a replayable curl proof, the fix, and its OWASP API tag.
 ![Findings-first report](assets/findings-report.png)
+
+### Findings-first report — dark theme
+The report is theme-aware (follows the viewer's light/dark preference).
+![Findings-first report (dark)](assets/findings-report-dark.png)
