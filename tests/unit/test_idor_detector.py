@@ -83,6 +83,28 @@ class TestIDORDetector:
         tokens = detector.extract_auth_tokens(empty_har)
         assert tokens == {}
 
+    def test_extract_auth_tokens_not_in_first_entry(self):
+        # Cas réel : la 1re requête est publique (aucun token) et l'auth n'apparaît
+        # que sur les entrées suivantes. Ne balayer que entries[0] renvoyait {}.
+        har = {"log": {"entries": [
+            {"request": {"url": "http://t/public", "headers": []}},
+            {"request": {"url": "http://t/me", "headers": [
+                {"name": "Authorization", "value": "Bearer abc.def.ghi"}]}},
+        ]}}
+        tokens = IDORDetector.extract_auth_tokens(har)
+        assert tokens.get('Authorization') == 'Bearer abc.def.ghi'
+
+    def test_extract_auth_tokens_case_insensitive(self):
+        # Un HAR HTTP/2 (Chrome, Firefox) met les noms d'en-têtes en minuscules.
+        har = {"log": {"entries": [
+            {"request": {"url": "http://t/me", "headers": [
+                {"name": "authorization", "value": "Bearer x"},
+                {"name": "cookie", "value": "sid=1"}]}},
+        ]}}
+        tokens = IDORDetector.extract_auth_tokens(har)
+        assert tokens.get('Authorization') == 'Bearer x'
+        assert tokens.get('Cookie') == 'sid=1'
+
     @patch('requests.Session')
     def test_request_without_zap(self, mock_session_class, session_a_har, session_b_har, config):
         mock_session = Mock()
