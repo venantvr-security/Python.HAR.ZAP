@@ -92,7 +92,7 @@ class HTTPSmugglingTester:
                            smuggled_request: str = None) -> bytes:
         """Build raw HTTP request with smuggling payload"""
         request_lines = [
-            f"POST / HTTP/1.1",
+            "POST / HTTP/1.1",
             f"Host: {host}",
         ]
 
@@ -151,7 +151,7 @@ class HTTPSmugglingTester:
         request = self._build_raw_request(parsed.netloc, payload)
 
         # Send request
-        response = self._send_raw_request(host, port, request, use_ssl)
+        self._send_raw_request(host, port, request, use_ssl)
 
         if response is None:
             return None
@@ -222,7 +222,7 @@ class HTTPSmugglingTester:
         request = self._build_raw_request(parsed.netloc, timing_payload)
 
         start = time.time()
-        response = self._send_raw_request(host, port, request, use_ssl)
+        self._send_raw_request(host, port, request, use_ssl)  # réponse ignorée : seul le temps de réponse compte ici
         elapsed = time.time() - start
 
         # If response took significantly longer than normal
@@ -263,7 +263,7 @@ class HTTPSmugglingTester:
             timing_result = self.test_timing_based(target)
             if timing_result:
                 results.append(timing_result)
-                print(f"[HTTPSmuggling] ⏱️ Timing-based desync detected!")
+                print("[HTTPSmuggling] ⏱️ Timing-based desync detected!")
 
         return results
 

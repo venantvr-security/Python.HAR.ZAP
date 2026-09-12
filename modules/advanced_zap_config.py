@@ -25,7 +25,7 @@ class AdvancedZAPConfig:
     def _configure_form_auth(self, config: Dict):
         """Configure form-based authentication"""
         try:
-            context_id = self._get_or_create_context(config.get('context_name', 'Default'))
+            self._get_or_create_context(config.get('context_name', 'Default'))
 
             login_url = config.get('login_url')
             username_field = config.get('username_field', 'username')
@@ -51,7 +51,7 @@ class AdvancedZAPConfig:
     def _configure_script_auth(self, config: Dict):
         """Configure script-based authentication"""
         try:
-            context_id = self._get_or_create_context(config.get('context_name', 'Default'))
+            self._get_or_create_context(config.get('context_name', 'Default'))  # crée le contexte si absent (effet de bord voulu)
 
             script_name = config.get('script_name')
             script_content = config.get('script_content')
@@ -66,7 +66,7 @@ class AdvancedZAPConfig:
                     charset='UTF-8'
                 )
 
-            print(f"[ZAPConfig] Script-based auth configured")
+            print("[ZAPConfig] Script-based auth configured")
 
         except Exception as e:
             print(f"[ZAPConfig] Failed to configure script auth: {e}")
@@ -88,7 +88,7 @@ class AdvancedZAPConfig:
                 config.get('password')
             )
 
-            print(f"[ZAPConfig] HTTP auth configured")
+            print("[ZAPConfig] HTTP auth configured")
 
         except Exception as e:
             print(f"[ZAPConfig] Failed to configure HTTP auth: {e}")
@@ -107,7 +107,7 @@ class AdvancedZAPConfig:
                     replacement=f'Bearer {token}'
                 )
 
-                print(f"[ZAPConfig] OAuth2 token configured")
+                print("[ZAPConfig] OAuth2 token configured")
 
         except Exception as e:
             print(f"[ZAPConfig] Failed to configure OAuth2: {e}")
@@ -126,7 +126,7 @@ class AdvancedZAPConfig:
                     replacement=f'Bearer {token}'
                 )
 
-                print(f"[ZAPConfig] JWT token configured")
+                print("[ZAPConfig] JWT token configured")
 
         except Exception as e:
             print(f"[ZAPConfig] Failed to configure JWT: {e}")
@@ -158,7 +158,7 @@ class AdvancedZAPConfig:
         """Configure ZAP context with include/exclude patterns"""
         try:
             context_name = context_config.get('name', 'Default')
-            context_id = self._get_or_create_context(context_name)
+            self._get_or_create_context(context_name)
 
             for pattern in context_config.get('include_patterns', []):
                 self.zap.context.include_in_context(context_name, pattern)
@@ -193,10 +193,7 @@ class AdvancedZAPConfig:
     def configure_active_scan_policy(self, policy_name: str, policy_config: Dict):
         """Configure custom active scan policy"""
         try:
-            strength = policy_config.get('strength', 'MEDIUM')
-            threshold = policy_config.get('threshold', 'MEDIUM')
 
-            enabled_categories = policy_config.get('categories', [])
             disabled_scanners = policy_config.get('disabled_scanners', [])
 
             for scanner_id in disabled_scanners:
@@ -264,7 +261,7 @@ class AdvancedZAPConfig:
     def export_context(self, context_name: str, output_path: str):
         """Export context to file"""
         try:
-            context_data = self.zap.context.export_context(context_name, output_path)
+            self.zap.context.export_context(context_name, output_path)
             print(f"[ZAPConfig] Context exported to {output_path}")
             return True
         except Exception as e:

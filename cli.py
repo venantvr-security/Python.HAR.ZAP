@@ -410,7 +410,7 @@ def run_scan(args):
                 )
             incremental.end_session({'total': len(har_data['urls']), 'new': len(alerts)})
 
-        print(f"[4/5] Generating reports...")
+        print("[4/5] Generating reports...")
         duration = f"{time.time() - start_time:.1f}s"
 
         # Save reports
@@ -507,7 +507,7 @@ def run_graphql(args):
 
     results = scanner.scan_all()
 
-    print(f"[3/3] Results:")
+    print("[3/3] Results:")
     print(f"  Endpoints: {results['summary']['total_endpoints']}")
     print(f"  Introspection enabled: {results['summary']['introspection_enabled']}")
     print(f"  Vulnerabilities: {results['summary']['vulnerabilities_found']}")
@@ -546,7 +546,7 @@ def run_websocket(args):
 
     results = asyncio.get_event_loop().run_until_complete(scanner.scan_all())
 
-    print(f"[3/3] Results:")
+    print("[3/3] Results:")
     print(f"  Endpoints: {results['summary']['total_endpoints']}")
     print(f"  Require auth: {results['summary']['require_auth']}")
     print(f"  Vulnerabilities: {results['summary']['vulnerabilities_found']}")
@@ -1427,7 +1427,7 @@ def run_diagnose(args):
             if high_count > max_high:
                 print(f"\nFAILED: {high_count} critical/high findings (max: {max_high})")
                 return 1
-            print(f"\nPASSED: Within acceptance criteria")
+            print("\nPASSED: Within acceptance criteria")
 
         return 0
 
