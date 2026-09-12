@@ -340,7 +340,7 @@ def enrich_zap_from_har(
     }
 
     # This triggers auto-persist via get_domain_enrichment
-    domain_enrichment = enricher.get_domain_enrichment()
+    enricher.get_domain_enrichment()
 
     # Add session info if persisted
     if enricher.session_id:

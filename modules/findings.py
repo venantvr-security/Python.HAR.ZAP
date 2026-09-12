@@ -117,7 +117,7 @@ def build_findings(all_findings: List[Dict], adaptive_result=None, target: str =
                 continue
             url = getattr(getattr(f, 'observation', None), 'url', '') or f.target_url
             owasp, impact, fix = _kb('idor')
-            out.append(Finding('High', f"BOLA — object accessible across users",
+            out.append(Finding('High', "BOLA — object accessible across users",
                                'idor', url, owasp, impact, fix,
                                curl_for('GET', url), 'GET',
                                getattr(getattr(f, 'verdict', None), 'confidence', None)))

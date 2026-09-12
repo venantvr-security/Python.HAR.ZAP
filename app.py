@@ -822,7 +822,6 @@ def render_redteam_tab():
                 with st.expander(f"📚 {attack_key} - Explained", expanded=True):
                     show_attack_help(attack_key)
 
-    attack_types = selected_attacks
 
     if st.button("🚀 Launch Red Team Attacks", type="primary"):
         with st.spinner("Running offensive security tests..."):
@@ -894,7 +893,7 @@ def render_fuzzer_tab():
                     st.write(f"**Parameters:** {', '.join(rec['params'])}")
                     st.write(f"**Wordlist size:** {len(rec['wordlist'])} items")
 
-                    if st.button(f"Preview wordlist", key=f"preview_{rec['target']}"):
+                    if st.button("Preview wordlist", key=f"preview_{rec['target']}"):
                         st.code('\n'.join(str(x) for x in rec['wordlist'][:20]))
 
     st.subheader("🎯 Fuzzing Configuration")
@@ -910,9 +909,9 @@ def render_fuzzer_tab():
     )
 
     if fuzzing_type == "Custom Parameter":
-        custom_url = st.text_input("Target URL")
-        custom_param = st.text_input("Parameter to fuzz")
-        wordlist_choice = st.selectbox("Wordlist", ["ids", "usernames", "emails", "paths", "params"])
+        st.text_input("Target URL")
+        st.text_input("Parameter to fuzz")
+        st.selectbox("Wordlist", ["ids", "usernames", "emails", "paths", "params"])
 
         if st.button("🚀 Start Custom Fuzzing", type="primary"):
             st.info("Custom fuzzing feature requires ZAP integration - coming soon")
@@ -1009,7 +1008,7 @@ def render_passive_tab():
 
                 summary = orchestrator.generate_summary()
 
-                st.success(f"✓ Passive analysis complete!")
+                st.success("✓ Passive analysis complete!")
 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Total Issues", summary['total_issues'])

@@ -239,9 +239,6 @@ class JWTAttackTester:
         if not header or not payload:
             return None
 
-        # Create none token
-        none_token = self.create_none_token(payload)
-
         # Also test with variants
         none_variants = [
             {'alg': 'none', 'typ': 'JWT'},
@@ -493,7 +490,7 @@ class JWTAttackTester:
             result = self.test_none_algorithm(jwt_data)
             if result and result.vulnerable:
                 results.append(result)
-                print(f"[JWTAttack] 🚨 'none' algorithm bypass!")
+                print("[JWTAttack] 🚨 'none' algorithm bypass!")
 
             # Weak secret
             result = self.test_weak_secret(jwt_data)
@@ -506,13 +503,13 @@ class JWTAttackTester:
             if result:
                 results.append(result)
                 if result.vulnerable:
-                    print(f"[JWTAttack] ⚠️ Algorithm confusion possible (JWKS found)")
+                    print("[JWTAttack] ⚠️ Algorithm confusion possible (JWKS found)")
 
             # KID injection
             result = self.test_kid_injection(jwt_data)
             if result and result.vulnerable:
                 results.append(result)
-                print(f"[JWTAttack] 🚨 KID injection!")
+                print("[JWTAttack] 🚨 KID injection!")
 
             # JKU injection
             result = self.test_jku_injection(jwt_data)

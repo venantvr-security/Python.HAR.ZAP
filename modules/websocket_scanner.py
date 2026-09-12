@@ -169,7 +169,7 @@ class WebSocketScanner:
                         extra_headers=extra_headers,
                         close_timeout=5,
                         open_timeout=10
-                    ) as ws:
+                    ):
                         result['tests'].append({
                             'origin': origin,
                             'accepted': True

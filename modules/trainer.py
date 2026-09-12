@@ -143,7 +143,6 @@ class Trainer:
         - Not HTML/JSON content
         """
         url = response.get('url', '')
-        status = response.get('status_code', 0)
         content_type = response.get('content_type', '')
 
         # Check scope

@@ -45,7 +45,6 @@ class MetaAnalyzer:
             # Determine element type (Arachni: link, form, cookie, header)
             # ZAP doesn't always provide this, infer from attack type
             if alert.get('attack', ''):
-                attack = alert.get('attack', '')
                 if 'Cookie' in alert.get('evidence', ''):
                     element_type = 'cookie'
                 elif param in ['Authorization', 'User-Agent', 'Referer']:
@@ -300,7 +299,7 @@ class MetaAnalyzer:
             'deduplicated_count': len(self.deduplicate_alerts())
         }
 
-        print(f"\n[Meta] Meta-Analysis Complete")
+        print("\n[Meta] Meta-Analysis Complete")
         print(f"[Meta]   Uniform vulns: {len(report['uniform_vulnerabilities'])}")
         print(f"[Meta]   Cascades: {len(report['cascading_vulnerabilities'])}")
         print(f"[Meta]   Auth issues: {report['authentication_patterns']['total_auth_alerts']}")

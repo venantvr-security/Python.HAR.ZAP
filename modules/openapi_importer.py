@@ -180,7 +180,6 @@ class OpenAPIImporter:
             raise Exception("No OpenAPI spec loaded")
 
         try:
-            spec_content = json.dumps(self.spec)
 
             self.zap.openapi.import_url(
                 url=target_url or self._extract_base_url(self._detect_version()),

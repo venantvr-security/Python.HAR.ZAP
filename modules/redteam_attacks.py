@@ -739,7 +739,7 @@ class RaceConditionTester:
                     )
                     results.append(result)
                     self._raise_alert(result)
-                    print(f"[RedTeam] ⚠️  Possible race condition vulnerability detected!")
+                    print("[RedTeam] ⚠️  Possible race condition vulnerability detected!")
 
             except Exception as e:
                 print(f"[RedTeam] Error testing {mask_url(target['url'])}: {e}")

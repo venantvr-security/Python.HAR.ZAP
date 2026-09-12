@@ -390,13 +390,13 @@ class CachePoisoningTester:
             fat_result = self.test_fat_get(url)
             if fat_result:
                 results.append(fat_result)
-                print(f"[CachePoison] 🚨 Fat GET attack possible!")
+                print("[CachePoison] 🚨 Fat GET attack possible!")
 
             # Test parameter cloaking
             cloak_result = self.test_parameter_cloaking(url)
             if cloak_result:
                 results.append(cloak_result)
-                print(f"[CachePoison] ⚠️ Parameter cloaking detected!")
+                print("[CachePoison] ⚠️ Parameter cloaking detected!")
 
         return results
 
