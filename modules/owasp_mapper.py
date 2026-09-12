@@ -676,8 +676,9 @@ class OWASPLLMClassifier:
     def __init__(self, config: Optional[Dict] = None):
         self._client = None
         try:
-            from .llm import LLMClient  # lazy: module stays importable without the subsystem
-            self._client = LLMClient.from_config(config or {})
+            # Passe par le factory partagé pour bénéficier du record/replay LLM.
+            from .llm.adaptive_idor import client_from_config
+            self._client = client_from_config(config or {})
         except Exception as e:  # missing key, missing subsystem, bad config
             logger.info("owasp_llm_classifier_unavailable", reason=str(e))
             self._client = None
