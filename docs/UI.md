@@ -20,3 +20,7 @@ Two-session cross-user access-control testing (BOLA / API1).
 ## Passive Scan
 Non-invasive checks — security headers, sensitive-data leaks, token entropy.
 ![Passive scan tab](assets/streamlit-passive.png)
+
+## Findings-first report
+Severity-sorted, each finding with impact, a replayable curl proof, the fix, and its OWASP API tag.
+![Findings-first report](assets/findings-report.png)
