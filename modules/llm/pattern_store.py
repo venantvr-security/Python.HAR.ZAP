@@ -8,9 +8,12 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 from modules.utils import get_logger
+
+if TYPE_CHECKING:  # annotation forward-ref uniquement
+    from .zap_integration import DomainEnrichment
 
 logger = get_logger("llm.pattern_store")
 
