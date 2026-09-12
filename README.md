@@ -82,6 +82,16 @@ red only on genuinely new exposure. Add `--ai-record run.json` once, then
 `--ai-replay run.json` to re-run the exact AI-assisted assessment offline, with no
 API calls and no key.
 
+## Web UI (Streamlit)
+
+For interactive use, `streamlit run app.py` opens the dashboard — upload a HAR,
+set scope and attack types, run, and read findings, driving the same engines as
+the CLI.
+
+![HAR-ZAP — Guide tab](docs/assets/streamlit-home.png)
+
+![HAR-ZAP — HAR upload & scan configuration](docs/assets/streamlit-upload.png)
+
 ## Observability (Grafana)
 
 Findings and request telemetry ship to a Loki + Prometheus + Grafana stack, with a
