@@ -197,6 +197,8 @@ Examples:
                              help='Compose exploit chains from the findings (LLM with --ai, else heuristic)')
     diag_parser.add_argument('--business-flow', action='store_true',
                              help='Active business-flow abuse (API6): state-skip, value manipulation, replay')
+    diag_parser.add_argument('--third-party', action='store_true',
+                             help='Analyze third-party API consumption (API10): cleartext, redirects, deps')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -992,6 +994,8 @@ def _run_coverage(har_data, all_findings, adaptive_result, args, report):
         categories |= {'API9'}
     if getattr(args, 'business_flow', False):
         categories |= {'API6'}
+    if getattr(args, 'third_party', False):
+        categories |= {'API10'}
     rep = build_coverage(har_data, tested, categories)
     report['coverage'] = rep.to_dict()
     print(render_cli(rep))
@@ -1344,6 +1348,13 @@ def run_diagnose(args):
         # Active business-flow abuse (API6): state-skip / value manipulation / replay.
         if getattr(args, 'business_flow', False):
             all_findings.extend(_run_business_flow(har_data, config, args, zap_client))
+
+        # Third-party API consumption (API10) — static HAR analysis.
+        if getattr(args, 'third_party', False):
+            from modules.unsafe_consumption import analyze_consumption, consumption_findings_flat
+            uc = consumption_findings_flat(analyze_consumption(har_data, args.target))
+            print(f"[THIRD-PARTY] {len(uc)} consumption finding(s)")
+            all_findings.extend(uc)
 
         # Security-regression gate: fail only on findings NEW vs the baseline.
         gate_result = None

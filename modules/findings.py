@@ -51,6 +51,9 @@ _KB = {
     'business_flow': ('API6:2023 Sensitive Business Flows',
              "A business flow is abusable — step skipped, value out of bounds, or one-shot replayed.",
              "Enforce step ordering and idempotency server-side; validate business values."),
+    'unsafe_consumption': ('API10:2023 Unsafe Consumption of APIs',
+             "The app consumes third-party API data that may be untrusted or in cleartext.",
+             "Use TLS to upstreams; validate/sanitize consumed data; don't blindly follow redirects."),
 }
 _REDTEAM_MAP = [('unauth', 'jwt'), ('mass', 'mass_assignment'),
                 ('hidden', 'hidden_params'), ('auth', 'jwt')]
