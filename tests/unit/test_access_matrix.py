@@ -81,3 +81,32 @@ class TestRunMatrix:
     def test_render_cli(self):
         out = render_matrix_cli(run_matrix(ROLES, build_endpoints(ROLE_HARS), self._server_bfla()))
         assert 'ACCESS MATRIX' in out and 'Violations: 1' in out
+
+
+class TestParallelism:
+    def test_parallel_equals_sequential(self):
+        # Serveur BFLA connu ; résultat identique en parallèle et séquentiel.
+        def srv(url, method, headers):
+            tok = headers.get('Authorization', '')
+            if '/admin/config' in url:
+                return {'status': 200} if tok else {'status': 403}   # bug: user aussi
+            if '/users/42' in url:
+                return {'status': 200} if tok else {'status': 401}
+            return {'status': 404}
+        eps = build_endpoints(ROLE_HARS)
+        seq = run_matrix(ROLES, eps, srv, max_workers=1)
+        par = run_matrix(ROLES, eps, srv, max_workers=8)
+        assert par.grid == seq.grid
+        assert [v.detail for v in par.violations] == [v.detail for v in seq.violations]
+
+    def test_all_requests_executed_in_parallel(self):
+        import threading
+        seen = set()
+        lock = threading.Lock()
+        def srv(url, method, headers):
+            with lock:
+                seen.add((url, headers.get('Authorization', '')))
+            return {'status': 403}
+        eps = build_endpoints(ROLE_HARS)
+        run_matrix(ROLES, eps, srv, max_workers=8)
+        assert len(seen) == len(eps) * len(ROLES)   # chaque cellule rôle×endpoint tirée

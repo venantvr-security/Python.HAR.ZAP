@@ -31,6 +31,7 @@ HAR-ZAP is an adaptive, LLM-assisted API pentester built on OWASP ZAP.
 |-----|-----------|
 | [api/CLI.md](api/CLI.md) | CLI reference (all commands & flags) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture |
+| [PERFORMANCE.md](PERFORMANCE.md) | Performance analysis & tuning tips |
 | [examples/CICD.md](examples/CICD.md) | CI/CD integration & the regression gate |
 
 ## Deep dives

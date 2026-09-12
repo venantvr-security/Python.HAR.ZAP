@@ -157,6 +157,8 @@ Examples:
     mtx_parser.add_argument('--api-key', help='ZAP API key')
     mtx_parser.add_argument('--fail-on-violation', action='store_true',
                             help='Exit code 1 if any access-control violation is found')
+    mtx_parser.add_argument('--workers', type=int, default=8,
+                            help='Parallel request workers for the matrix (default 8)')
 
     # === CACHE COMMAND ===
     cache_parser = subparsers.add_parser('cache', help='Manage incremental scan cache')
@@ -614,7 +616,7 @@ def run_matrix_cmd(args):
                 return {'status': 0, 'content_length': 0, 'body': ''}
 
     print(f"[MATRIX] transport: {transport}")
-    matrix = run_matrix(roles, endpoints, execute)
+    matrix = run_matrix(roles, endpoints, execute, max_workers=getattr(args, "workers", 8))
     print(render_matrix_cli(matrix))
 
     # Sortie findings-first des violations + rapports.

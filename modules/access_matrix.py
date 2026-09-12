@@ -100,21 +100,42 @@ def build_endpoints(role_hars: List[Tuple[str, Dict]]) -> List[Endpoint]:
 
 
 def run_matrix(roles: List[Role], endpoints: List[Endpoint],
-               execute_fn: ExecuteFn) -> AccessMatrix:
-    """Construit la grille rôle×endpoint et en déduit les violations."""
+               execute_fn: ExecuteFn, max_workers: int = 8) -> AccessMatrix:
+    """Construit la grille rôle×endpoint et en déduit les violations.
+
+    Perf : les N×M requêtes (rôle × endpoint) sont indépendantes → exécutées en
+    parallèle (pool de threads, I/O-bound). Le calcul des violations se fait
+    ensuite de façon séquentielle et ordonnée, donc le résultat reste déterministe.
+    """
+    from concurrent.futures import ThreadPoolExecutor
     role_names = [r.name for r in roles]
     matrix = AccessMatrix(roles=role_names, endpoints=[e.template for e in endpoints])
 
+    tasks = [(ep, role) for ep in endpoints for role in roles]
+
+    def _call(task):
+        ep, role = task
+        resp = execute_fn(ep.url, ep.method, role.headers) or {}
+        return (ep.template, role.name, int(resp.get('status', 0)))
+
+    results: Dict = {}
+    if max_workers > 1 and len(tasks) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for tpl, rname, status in ex.map(_call, tasks):
+                results[(tpl, rname)] = status
+    else:
+        for task in tasks:
+            tpl, rname, status = _call(task)
+            results[(tpl, rname)] = status
+
+    # Calcul déterministe (ordre des endpoints puis des rôles) une fois l'I/O terminé.
     for ep in endpoints:
         cells: Dict[str, int] = {}
         requires_role = roles[ep.min_priv].name if ep.min_priv < len(roles) else '?'
         for role in roles:
-            resp = execute_fn(ep.url, ep.method, role.headers) or {}
-            status = int(resp.get('status', 0))
+            status = results.get((ep.template, role.name), 0)
             cells[role.name] = status
-            allowed = 200 <= status < 300
-            # Violation : un rôle sous le plancher d'autorisation accède (2xx).
-            if allowed and role.priv < ep.min_priv:
+            if 200 <= status < 300 and role.priv < ep.min_priv:
                 matrix.violations.append(Violation(
                     endpoint=ep.template, method=ep.method, role=role.name,
                     requires_role=requires_role, status=status,
