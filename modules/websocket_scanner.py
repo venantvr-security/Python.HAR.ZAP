@@ -273,8 +273,13 @@ class WebSocketScanner:
         return await self.fuzz_messages(endpoint, injection_payloads)
 
     def scan_all_sync(self) -> Dict[str, Any]:
-        """Run full WebSocket security scan (synchronous wrapper)."""
-        return asyncio.get_event_loop().run_until_complete(self.scan_all())
+        """Run full WebSocket security scan (synchronous wrapper).
+
+        `asyncio.get_event_loop()` raises `RuntimeError: no current event loop`
+        on Python 3.10+ when none exists in the thread; `asyncio.run` creates,
+        runs and closes a fresh loop, which is the correct modern wrapper.
+        """
+        return asyncio.run(self.scan_all())
 
     async def scan_all(self) -> Dict[str, Any]:
         """Run full WebSocket security scan."""

@@ -2,7 +2,7 @@
 LLM to ZAP Integration - Bridge between LLM strategies and ZAP enrichment.
 Enriches ZAP fuzzer lists with domain-specific payloads.
 """
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass, field
 
 from .analyzer import SecurityPlan
@@ -17,6 +17,10 @@ from .strategies import (
 from modules.utils import get_logger
 
 logger = get_logger("llm.zap_integration")
+
+if TYPE_CHECKING:  # imports pour l'analyse de types uniquement (annotations forward-ref)
+    from modules.dictionary_manager import DictionaryManager
+    from modules.zap_enricher import ZAPPayloadEnricher
 
 
 @dataclass
