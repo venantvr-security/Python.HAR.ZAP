@@ -45,6 +45,9 @@ _KB = {
     'passive': ('API8:2023 Security Misconfiguration',
              "Missing hardening (security headers, cookies).",
              "Set HSTS/CSP/X-Content-Type-Options; secure cookies."),
+    'access_matrix': ('API5:2023 BFLA',
+             "A lower-privilege role reaches an endpoint reserved for a higher one.",
+             "Enforce role checks server-side on every endpoint; deny by default."),
 }
 _REDTEAM_MAP = [('unauth', 'jwt'), ('mass', 'mass_assignment'),
                 ('hidden', 'hidden_params'), ('auth', 'jwt')]
