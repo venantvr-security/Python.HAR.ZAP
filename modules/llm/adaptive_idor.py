@@ -305,10 +305,21 @@ def _extract_json(raw: Optional[str]):
 
 def client_from_config(config: Optional[Dict]):
     """Construit un LLMClient depuis la config, ou None si aucune clé n'est
-    configurée (la boucle bascule alors en heuristique offline)."""
+    configurée (la boucle bascule alors en heuristique offline).
+
+    Applique aussi le record/replay des interactions LLM si activé par
+    l'environnement (voir modules.llm.replay), pour rejouer une séquence sans IA.
+    """
+    from .replay import wrap_for_replay
+    import os
+    inner = None
     try:
         from .client import LLMClient
-        return LLMClient.from_config(config or {})
+        inner = LLMClient.from_config(config or {})
     except Exception as e:
         logger.info("adaptive_idor_client_unavailable", reason=str(e))
-        return None
+        inner = None
+    # En mode replay, aucune clé n'est requise (servi depuis le transcript).
+    if os.environ.get('HARZAP_LLM_REPLAY_MODE', '').lower() == 'replay':
+        return wrap_for_replay(inner, config)
+    return wrap_for_replay(inner, config) if inner is not None else None

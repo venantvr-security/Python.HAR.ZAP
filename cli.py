@@ -199,6 +199,10 @@ Examples:
                              help='Active business-flow abuse (API6): state-skip, value manipulation, replay')
     diag_parser.add_argument('--third-party', action='store_true',
                              help='Analyze third-party API consumption (API10): cleartext, redirects, deps')
+    diag_parser.add_argument('--ai-record', metavar='FILE',
+                             help='Record all LLM responses to a transcript (implies --ai)')
+    diag_parser.add_argument('--ai-replay', metavar='FILE',
+                             help='Replay LLM responses from a transcript — no API calls, no key needed')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -1158,8 +1162,21 @@ def run_diagnose(args):
     plus de requêtes et de temps. À utiliser avec précaution sur un environ-
     nement partagé ; préférer `--dry-run` d'abord.
     """
-    import time
+    import time, os
     start_time = time.time()
+
+    # Record/replay des interactions LLM : configure l'environnement lu par le
+    # factory client_from_config. Le replay implique l'usage des chemins IA.
+    if getattr(args, 'ai_replay', None):
+        os.environ['HARZAP_LLM_REPLAY_MODE'] = 'replay'
+        os.environ['HARZAP_LLM_REPLAY_FILE'] = args.ai_replay
+        args.ai = True
+        print(f"[AI] replay from transcript: {args.ai_replay} (no API calls)")
+    elif getattr(args, 'ai_record', None):
+        os.environ['HARZAP_LLM_REPLAY_MODE'] = 'record'
+        os.environ['HARZAP_LLM_REPLAY_FILE'] = args.ai_record
+        args.ai = True
+        print(f"[AI] recording transcript: {args.ai_record}")
 
     if not Path(args.har_file).exists():
         print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
