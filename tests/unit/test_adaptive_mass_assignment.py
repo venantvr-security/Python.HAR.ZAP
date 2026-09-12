@@ -41,6 +41,32 @@ class TestOffline:
         assert not f.vulnerable
 
 
+class TestSecondOrderVerification:
+    """Un serveur qui répond 2xx en IGNORANT les champs inconnus (cas très
+    courant) piège l'heuristique. verify_fn tranche par l'effet réel."""
+
+    def _ignoring_server(self, payload):
+        # Accepte tout en apparence (200, pas d'erreur), quel que soit le champ.
+        return {'status': 200, 'body': 'registered'}
+
+    def test_without_verify_flags_everything(self):
+        # Sans vérification : chaque champ testé est jugé accepté (faux positifs).
+        f = AdaptiveMassAssignmentLoop(self._ignoring_server).run(TARGET)
+        assert f.vulnerable
+        assert len(f.accepted_fields) > 1  # bruit : plusieurs champs "acceptés"
+        assert f.suspected_fields == []
+
+    def test_with_verify_confirms_only_real(self):
+        # verify_fn ne confirme que 'admin' : lui seul est retenu, le reste suspecté.
+        f = AdaptiveMassAssignmentLoop(
+            self._ignoring_server,
+            verify_fn=lambda field, value: field == 'admin').run(TARGET)
+        accepted = [e['field'] for e in f.accepted_fields]
+        suspected = [e['field'] for e in f.suspected_fields]
+        assert accepted == ['admin']
+        assert 'admin' not in suspected and len(suspected) >= 1
+
+
 class TestLLM:
     def test_llm_interpret_and_refine(self):
         def server(payload):

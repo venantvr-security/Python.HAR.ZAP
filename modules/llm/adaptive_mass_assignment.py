@@ -62,6 +62,12 @@ class MAVerdict:
 class MAFinding:
     target_url: str
     accepted_fields: List[Dict] = field(default_factory=list)  # [{'field','value','reason'}]
+    # Champs jugés acceptés par la seule heuristique de réponse mais NON confirmés
+    # par une vérification de second ordre. Sur un endpoint de création qui répond
+    # 2xx en ignorant les champs inconnus (cas très courant), l'heuristique en
+    # produit beaucoup : ce sont des faux positifs potentiels tant qu'on n'a pas
+    # observé l'effet réel (relecture de l'objet, action privilégiée).
+    suspected_fields: List[Dict] = field(default_factory=list)
     tried: List[str] = field(default_factory=list)
     rounds: int = 0
 
@@ -75,12 +81,17 @@ class AdaptiveMassAssignmentLoop:
 
     def __init__(self, execute_fn: ExecuteFn, client=None, *,
                  max_rounds: int = 3, per_round: int = 6,
-                 context: Optional[Dict] = None):
+                 context: Optional[Dict] = None, verify_fn=None):
         self.execute_fn = execute_fn
         self.client = client
         self.max_rounds = max_rounds
         self.per_round = per_round
         self.context = context or {}
+        # verify_fn(field, value) -> bool : vérification de second ordre confirmant
+        # que l'injection a RÉELLEMENT pris effet (ex. relire l'objet, se logguer
+        # et tester un accès privilégié). Sans elle, on ne peut pas distinguer
+        # « champ stocké » de « champ ignoré » derrière un même 2xx.
+        self.verify_fn = verify_fn
 
     @property
     def _llm_available(self) -> bool:
@@ -103,12 +114,21 @@ class AdaptiveMassAssignmentLoop:
                 finding.tried.append(fld)
                 obs = self._observe(fld, val)
                 verdict = self._interpret(obs)
-                if verdict.accepted:
-                    finding.accepted_fields.append(
-                        {'field': fld, 'value': val, 'reason': verdict.reason})
-                    round_accepted.append(fld)
-                    logger.info("mass_assignment_accepted", url=target['url'],
-                                field=fld, source=verdict.source)
+                if not verdict.accepted:
+                    continue
+                # Vérification de second ordre : si fournie, elle seule fait foi.
+                # Un champ non confirmé reste « suspecté » (faux positif probable)
+                # et ne pilote pas le raffinement (on ne veut pas propager du bruit).
+                if self.verify_fn is not None and not self.verify_fn(fld, val):
+                    finding.suspected_fields.append(
+                        {'field': fld, 'value': val,
+                         'reason': f'{verdict.reason}; unconfirmed by verify_fn'})
+                    continue
+                finding.accepted_fields.append(
+                    {'field': fld, 'value': val, 'reason': verdict.reason})
+                round_accepted.append(fld)
+                logger.info("mass_assignment_accepted", url=target['url'],
+                            field=fld, source=verdict.source)
 
             candidates = self._refine(target, round_accepted, tried)
 
