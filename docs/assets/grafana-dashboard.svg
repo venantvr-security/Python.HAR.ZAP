@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" font-family="system-ui,Segoe UI,Roboto,sans-serif">
+  <defs>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3D8BFD" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#3D8BFD" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="560" fill="#0F1117"/>
+  <!-- top bar -->
+  <text x="24" y="34" fill="#E6E9EF" font-size="16" font-weight="700">HAR-ZAP Security Dashboard</text>
+  <text x="978" y="26" text-anchor="end" fill="#7C8291" font-size="11" font-weight="600" letter-spacing="0.08em">PREVIEW · EXAMPLE DATA</text>
+  <text x="978" y="40" text-anchor="end" fill="#5B6070" font-size="10">Grafana · Loki + Prometheus</text>
+
+  <!-- stat row -->
+  <g>
+    <rect x="24" y="56" width="304" height="96" rx="6" fill="#181B24" stroke="#262A36"/>
+    <rect x="24" y="56" width="4" height="96" rx="2" fill="#E0453C"/>
+    <text x="44" y="82" fill="#9AA0AE" font-size="12">High Risk Alerts (1h)</text>
+    <text x="44" y="130" fill="#E0453C" font-size="44" font-weight="800">3</text>
+
+    <rect x="348" y="56" width="304" height="96" rx="6" fill="#181B24" stroke="#262A36"/>
+    <rect x="348" y="56" width="4" height="96" rx="2" fill="#E0913C"/>
+    <text x="368" y="82" fill="#9AA0AE" font-size="12">Medium Risk Alerts (1h)</text>
+    <text x="368" y="130" fill="#E0913C" font-size="44" font-weight="800">11</text>
+
+    <rect x="672" y="56" width="304" height="96" rx="6" fill="#181B24" stroke="#262A36"/>
+    <rect x="672" y="56" width="4" height="96" rx="2" fill="#3D8BFD"/>
+    <text x="692" y="82" fill="#9AA0AE" font-size="12">Total Requests (1h)</text>
+    <text x="692" y="130" fill="#E6E9EF" font-size="44" font-weight="800">1,284</text>
+  </g>
+
+  <!-- pie: Alerts by Type -->
+  <g>
+    <rect x="24" y="168" width="468" height="184" rx="6" fill="#181B24" stroke="#262A36"/>
+    <text x="44" y="192" fill="#C9CEDA" font-size="13" font-weight="600">Alerts by Type (24h)</text>
+    <!-- donut: 4 slices -->
+    <g transform="translate(140,268)">
+      <!-- slices via stroke-dasharray on circle r=46 circumference ~289 -->
+      <circle r="46" fill="none" stroke="#E0453C" stroke-width="26" stroke-dasharray="87 202" transform="rotate(-90)"/>
+      <circle r="46" fill="none" stroke="#E0913C" stroke-width="26" stroke-dasharray="72 217" stroke-dashoffset="-87" transform="rotate(-90)"/>
+      <circle r="46" fill="none" stroke="#3D8BFD" stroke-width="26" stroke-dasharray="72 217" stroke-dashoffset="-159" transform="rotate(-90)"/>
+      <circle r="46" fill="none" stroke="#5AC97D" stroke-width="26" stroke-dasharray="58 231" stroke-dashoffset="-231" transform="rotate(-90)"/>
+    </g>
+    <g font-size="12" fill="#C9CEDA">
+      <rect x="300" y="214" width="10" height="10" fill="#E0453C"/><text x="318" y="223">BOLA / API1</text>
+      <rect x="300" y="238" width="10" height="10" fill="#E0913C"/><text x="318" y="247">Mass assignment</text>
+      <rect x="300" y="262" width="10" height="10" fill="#3D8BFD"/><text x="318" y="271">Security headers</text>
+      <rect x="300" y="286" width="10" height="10" fill="#5AC97D"/><text x="318" y="295">Hidden params</text>
+    </g>
+  </g>
+
+  <!-- logs: Security Alerts Stream -->
+  <g font-family="ui-monospace,Menlo,monospace">
+    <rect x="508" y="168" width="468" height="184" rx="6" fill="#181B24" stroke="#262A36"/>
+    <text x="528" y="192" fill="#C9CEDA" font-size="13" font-weight="600" font-family="system-ui">Security Alerts Stream</text>
+    <text x="528" y="216" font-size="11"><tspan fill="#E0453C">HIGH </tspan><tspan fill="#8B90A0">BOLA /v1/users/{id} — cross-user read</tspan></text>
+    <text x="528" y="238" font-size="11"><tspan fill="#E0453C">HIGH </tspan><tspan fill="#8B90A0">BFLA user→/v1/admin/config (matrix)</tspan></text>
+    <text x="528" y="260" font-size="11"><tspan fill="#E0913C">MED  </tspan><tspan fill="#8B90A0">mass-assign role=admin accepted</tspan></text>
+    <text x="528" y="282" font-size="11"><tspan fill="#E0913C">MED  </tspan><tspan fill="#8B90A0">business-flow: confirm without pay</tspan></text>
+    <text x="528" y="304" font-size="11"><tspan fill="#3D8BFD">LOW  </tspan><tspan fill="#8B90A0">missing Strict-Transport-Security</tspan></text>
+    <text x="528" y="326" font-size="11"><tspan fill="#3D8BFD">LOW  </tspan><tspan fill="#8B90A0">shadow endpoint /v1/admin/debug</tspan></text>
+  </g>
+
+  <!-- timeseries: Request Rate -->
+  <g>
+    <rect x="24" y="368" width="468" height="168" rx="6" fill="#181B24" stroke="#262A36"/>
+    <text x="44" y="392" fill="#C9CEDA" font-size="13" font-weight="600">Request Rate</text>
+    <!-- axes gridlines -->
+    <g stroke="#262A36" stroke-width="1">
+      <line x1="52" y1="420" x2="468" y2="420"/><line x1="52" y1="460" x2="468" y2="460"/><line x1="52" y1="500" x2="468" y2="500"/>
+    </g>
+    <!-- area + line -->
+    <path d="M52,494 L108,470 L164,478 L220,440 L276,452 L332,414 L388,436 L444,410 L468,420 L468,510 L52,510 Z" fill="url(#area)"/>
+    <path d="M52,494 L108,470 L164,478 L220,440 L276,452 L332,414 L388,436 L444,410 L468,420" fill="none" stroke="#3D8BFD" stroke-width="2"/>
+    <g fill="#5B6070" font-size="9"><text x="52" y="524">12:00</text><text x="240" y="524">12:30</text><text x="432" y="524">13:00</text></g>
+  </g>
+
+  <!-- table: Recent Vulnerabilities -->
+  <g>
+    <rect x="508" y="368" width="468" height="168" rx="6" fill="#181B24" stroke="#262A36"/>
+    <text x="528" y="392" fill="#C9CEDA" font-size="13" font-weight="600">Recent Vulnerabilities</text>
+    <g font-size="11" fill="#7C8291"><text x="528" y="414">SEVERITY</text><text x="610" y="414">OWASP</text><text x="700" y="414">ENDPOINT</text></g>
+    <line x1="528" y1="420" x2="956" y2="420" stroke="#262A36"/>
+    <g font-size="11" font-family="ui-monospace,Menlo,monospace">
+      <text x="528" y="440" fill="#E0453C">HIGH</text><text x="610" y="440" fill="#8B90A0">API1</text><text x="700" y="440" fill="#C9CEDA">GET /v1/users/{id}</text>
+      <text x="528" y="462" fill="#E0453C">HIGH</text><text x="610" y="462" fill="#8B90A0">API5</text><text x="700" y="462" fill="#C9CEDA">GET /v1/admin/config</text>
+      <text x="528" y="484" fill="#E0913C">MED</text><text x="610" y="484" fill="#8B90A0">API3</text><text x="700" y="484" fill="#C9CEDA">PATCH /v1/users/{id}</text>
+      <text x="528" y="506" fill="#E0913C">MED</text><text x="610" y="506" fill="#8B90A0">API6</text><text x="700" y="506" fill="#C9CEDA">POST /v1/orders/confirm</text>
+    </g>
+  </g>
+</svg>

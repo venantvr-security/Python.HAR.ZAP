@@ -82,6 +82,22 @@ red only on genuinely new exposure. Add `--ai-record run.json` once, then
 `--ai-replay run.json` to re-run the exact AI-assisted assessment offline, with no
 API calls and no key.
 
+## Observability (Grafana)
+
+Findings and request telemetry ship to a Loki + Prometheus + Grafana stack, with a
+pre-provisioned **HAR-ZAP Security Dashboard** (high/medium alert counts, alerts by
+type, a live alert stream, request rate, and a recent-vulnerabilities table).
+
+![HAR-ZAP Grafana dashboard](docs/assets/grafana-dashboard.svg)
+
+> Preview rendered from the committed dashboard (`deployment/grafana/dashboards/zap-security.json`) with example data — run the stack below for live panels.
+
+```bash
+docker compose -f deployment/docker-compose.observability.yml up -d
+# Grafana → http://localhost:3000  (admin / harzap2024)
+# The "HAR-ZAP Security Dashboard" is auto-provisioned.
+```
+
 ## Features
 
 ### Core Capabilities
