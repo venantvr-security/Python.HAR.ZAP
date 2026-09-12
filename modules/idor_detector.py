@@ -103,22 +103,33 @@ class IDORDetector:
 
     @staticmethod
     def extract_auth_tokens(har_data: Dict) -> Dict[str, str]:
-        """Extract authentication tokens from HAR entries"""
-        auth_headers = {}
+        """Extrait les en-têtes d'authentification (Authorization, Cookie, en-têtes
+        de token) du HAR.
 
-        entries = har_data.get('log', {}).get('entries', [])
-        if entries:
-            request = entries[0].get('request', {})
-            headers = {h['name']: h['value'] for h in request.get('headers', [])}
+        On balaie TOUTES les entrées, pas seulement la première : dans un HAR réel
+        la première requête est souvent non authentifiée (page d'accueil, liste
+        publique) et ne porte aucun token — se limiter à `entries[0]` renvoyait
+        alors `{}` alors que le trafic authentifié suit. On garde la DERNIÈRE
+        valeur vue pour chaque en-tête (généralement la session établie après
+        login). La comparaison est insensible à la casse car un HAR HTTP/2
+        (Chrome, Firefox) met les noms d'en-têtes en minuscules (`authorization`).
+        """
+        auth_headers: Dict[str, str] = {}
 
-            if 'Authorization' in headers:
-                auth_headers['Authorization'] = headers['Authorization']
-            if 'Cookie' in headers:
-                auth_headers['Cookie'] = headers['Cookie']
-
-            for key, value in headers.items():
-                if 'token' in key.lower() or 'auth' in key.lower():
-                    auth_headers[key] = value
+        for entry in har_data.get('log', {}).get('entries', []):
+            request = entry.get('request', {})
+            for h in request.get('headers', []):
+                name = h.get('name', '')
+                value = h.get('value', '')
+                if not name or not value:
+                    continue
+                low = name.lower()
+                if low == 'authorization':
+                    auth_headers['Authorization'] = value
+                elif low == 'cookie':
+                    auth_headers['Cookie'] = value
+                elif 'token' in low or 'auth' in low or low == 'x-api-key':
+                    auth_headers[name] = value
 
         return auth_headers
 
