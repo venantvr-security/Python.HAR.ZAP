@@ -141,6 +141,23 @@ Examples:
                              help='Emit OWASP API Top 10 2023 report (BOLA / API1)')
     idor_parser.add_argument('--webhook', help='Webhook type: slack, teams, discord')
 
+    # === MATRIX COMMAND ===
+    mtx_parser = subparsers.add_parser('matrix',
+                                       help='Multi-role access-control matrix (BOLA/BFLA map)')
+    mtx_parser.add_argument('--role', action='append', required=True, metavar='NAME=HAR',
+                            help='Role HAR in ASCENDING privilege order, repeatable '
+                                 '(e.g. --role user=user.har --role admin=admin.har)')
+    mtx_parser.add_argument('--anon', action='store_true',
+                            help='Prepend an anonymous (no-auth) role')
+    mtx_parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    mtx_parser.add_argument('--format', default='json,html', help='Output formats: json,html')
+    mtx_parser.add_argument('--via-zap', action='store_true',
+                            help='Route requests through a running ZAP proxy (else direct)')
+    mtx_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
+    mtx_parser.add_argument('--api-key', help='ZAP API key')
+    mtx_parser.add_argument('--fail-on-violation', action='store_true',
+                            help='Exit code 1 if any access-control violation is found')
+
     # === CACHE COMMAND ===
     cache_parser = subparsers.add_parser('cache', help='Manage incremental scan cache')
     cache_parser.add_argument('action', choices=['stats', 'clear', 'export'],
@@ -211,6 +228,8 @@ Examples:
         return run_graphql(args)
     elif args.command == 'websocket':
         return run_websocket(args)
+    elif args.command == 'matrix':
+        return run_matrix_cmd(args)
     elif args.command == 'idor':
         return run_idor(args)
     elif args.command == 'cache':
@@ -521,6 +540,87 @@ def run_websocket(args):
         json.dump(results, f, indent=2)
 
     print(f"\nResults saved: {output_file}")
+    return 0
+
+
+def run_matrix_cmd(args):
+    """Construit la matrice d'accès multi-rôles et cartographie BOLA/BFLA."""
+    from modules.access_matrix import (Role, build_endpoints, run_matrix, render_matrix_cli)
+    from modules.idor_detector import IDORDetector
+    from modules.findings import build_findings, render_cli, render_html
+
+    # Parse les rôles (ordre = privilège croissant), + rôle anonyme optionnel.
+    role_hars = []
+    roles = []
+    priv = 0
+    if args.anon:
+        role_hars.append(('anon', {'log': {'entries': []}}))
+        roles.append(Role('anon', {}, priv))
+        priv += 1
+    for spec in args.role:
+        if '=' not in spec:
+            print(f"Error: --role expects NAME=HAR, got '{spec}'", file=sys.stderr)
+            return 1
+        name, path = spec.split('=', 1)
+        if not Path(path).exists():
+            print(f"Error: HAR not found for role '{name}': {path}", file=sys.stderr)
+            return 1
+        with open(path) as f:
+            har = json.load(f)
+        role_hars.append((name, har))
+        roles.append(Role(name, IDORDetector.extract_auth_tokens(har) or {}, priv))
+        priv += 1
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+    endpoints = build_endpoints(role_hars)
+    print(f"[MATRIX] {len(roles)} roles × {len(endpoints)} endpoints")
+
+    # Exécuteur : proxy ZAP si --via-zap, sinon requests direct. Les en-têtes
+    # (auth) varient par rôle, donc l'exécuteur les reçoit à chaque appel.
+    if args.via_zap:
+        from modules.zap_http_client import ZAPHttpClient
+        zc = ZAPHttpClient(zap_url=args.zap_url, api_key=args.api_key or '')
+        transport = 'ZAP proxy'
+
+        def execute(url, method, headers):
+            r = zc.request(method, url, headers=headers, follow_redirects=False)
+            return {'status': r.status_code, 'content_length': len(r.content or b''),
+                    'body': (r.text or '')[:1000]}
+    else:
+        transport = 'direct requests'
+        import requests
+
+        def execute(url, method, headers):
+            try:
+                r = requests.request(method, url, headers=headers, timeout=10,
+                                     verify=False, allow_redirects=False)
+                return {'status': r.status_code, 'content_length': len(r.content),
+                        'body': r.text[:1000]}
+            except Exception:
+                return {'status': 0, 'content_length': 0, 'body': ''}
+
+    print(f"[MATRIX] transport: {transport}")
+    matrix = run_matrix(roles, endpoints, execute)
+    print(render_matrix_cli(matrix))
+
+    # Sortie findings-first des violations + rapports.
+    findings = build_findings(matrix.violation_findings())
+    if findings:
+        print(render_cli(findings))
+    report = {'target': ','.join(r.name for r in roles), 'summary': matrix.summary(),
+              'grid': matrix.grid, 'findings': [f.to_dict() for f in findings]}
+    with open(Path(args.output) / 'access_matrix.json', 'w') as f:
+        json.dump(report, f, indent=2)
+    if 'html' in args.format:
+        html_path = Path(args.output) / 'access_matrix.html'
+        html_path.write_text(render_html(findings, {'target': 'access-control matrix',
+                                                    'har_file': f"{len(roles)} roles"}))
+        print(f"Findings-first report: {html_path}")
+    print(f"\nResults: {args.output}/access_matrix.*")
+
+    if args.fail_on_violation and matrix.violations:
+        print(f"\nFAILED: {len(matrix.violations)} access-control violation(s)")
+        return 1
     return 0
 
 
