@@ -195,6 +195,8 @@ Examples:
                              help='OpenAPI spec (file/URL) to detect shadow endpoints (API9)')
     diag_parser.add_argument('--chains', action='store_true',
                              help='Compose exploit chains from the findings (LLM with --ai, else heuristic)')
+    diag_parser.add_argument('--business-flow', action='store_true',
+                             help='Active business-flow abuse (API6): state-skip, value manipulation, replay')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -918,6 +920,37 @@ class _OwaspAdj:
         return clf.classify_owasp(alert, categories)
 
 
+def _run_business_flow(har_data, config, args, zap_client):
+    """Moteur actif d'abus de flux métier (API6). Exécuteur via ZAP sinon requests ;
+    l'adjudicateur LLM (avec --ai) tranche les cas ambigus."""
+    from modules.business_flow import extract_flows, BusinessFlowScanner
+    from modules.idor_detector import IDORDetector
+    from modules.llm.adaptive_idor import client_from_config
+
+    auth = IDORDetector.extract_auth_tokens(har_data) or {}
+
+    def execute(method, url, headers, body):
+        hdrs = {**(headers or {}), **auth}
+        if zap_client is not None:
+            r = zap_client.request(method, url, headers=hdrs, json_data=body,
+                                   follow_redirects=False)
+            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
+        import requests
+        try:
+            r = requests.request(method, url, headers=hdrs, json=body, timeout=10,
+                                 verify=False, allow_redirects=False)
+            return {'status': r.status_code, 'body': r.text[:2000]}
+        except Exception:
+            return {'status': 0, 'body': ''}
+
+    adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
+    flows = extract_flows(har_data)
+    findings = BusinessFlowScanner(execute, adjudicator=adjud).run(flows)
+    flat = [f.flat() for f in findings]
+    print(f"[BUSINESS-FLOW] {len(flows)} flow(s), {len(flat)} abuse(s) accepted")
+    return flat
+
+
 def _run_shadow_endpoints(har_data, args, config):
     """Diff HAR ↔ OpenAPI → endpoints fantômes (API9)."""
     from modules.openapi_importer import OpenAPIImporter
@@ -957,6 +990,8 @@ def _run_coverage(har_data, all_findings, adaptive_result, args, report):
         categories |= {'API2', 'API4', 'API7'}
     if getattr(args, 'openapi', None):
         categories |= {'API9'}
+    if getattr(args, 'business_flow', False):
+        categories |= {'API6'}
     rep = build_coverage(har_data, tested, categories)
     report['coverage'] = rep.to_dict()
     print(render_cli(rep))
@@ -1305,6 +1340,10 @@ def run_diagnose(args):
         # Shadow endpoints (API9) — HAR vs OpenAPI spec diff.
         if getattr(args, 'openapi', None):
             all_findings.extend(_run_shadow_endpoints(har_data, args, config))
+
+        # Active business-flow abuse (API6): state-skip / value manipulation / replay.
+        if getattr(args, 'business_flow', False):
+            all_findings.extend(_run_business_flow(har_data, config, args, zap_client))
 
         # Security-regression gate: fail only on findings NEW vs the baseline.
         gate_result = None
