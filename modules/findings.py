@@ -48,6 +48,9 @@ _KB = {
     'access_matrix': ('API5:2023 BFLA',
              "A lower-privilege role reaches an endpoint reserved for a higher one.",
              "Enforce role checks server-side on every endpoint; deny by default."),
+    'business_flow': ('API6:2023 Sensitive Business Flows',
+             "A business flow is abusable — step skipped, value out of bounds, or one-shot replayed.",
+             "Enforce step ordering and idempotency server-side; validate business values."),
 }
 _REDTEAM_MAP = [('unauth', 'jwt'), ('mass', 'mass_assignment'),
                 ('hidden', 'hidden_params'), ('auth', 'jwt')]
