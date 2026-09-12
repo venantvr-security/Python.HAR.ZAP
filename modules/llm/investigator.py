@@ -67,12 +67,31 @@ class MassAssignmentInvestigator:
 
     def __init__(self, send: SendFn, client=None,
                  oracle_candidates: Optional[List[str]] = None,
-                 oracle_headers: Optional[Dict] = None):
+                 oracle_headers: Optional[Dict] = None,
+                 api_model=None, resource: Optional[str] = None):
         self.send = send
         self.client = client
-        self.oracle_candidates = list(oracle_candidates or [])
         self.oracle_headers = oracle_headers or {}
         self._seq = itertools.count(1)
+        self.api_model = api_model
+        self.resource = resource
+        # Les candidats-oracles viennent du modèle sémantique quand il est fourni
+        # (l'investigator ne redevine plus « quel GET relit cette ressource ») ;
+        # sinon on retombe sur la liste explicite passée par l'appelant.
+        self.oracle_candidates = list(oracle_candidates or [])
+        if not self.oracle_candidates and api_model is not None and resource:
+            self.oracle_candidates = api_model.oracle_candidate_urls(resource)
+
+    @classmethod
+    def for_route(cls, api_model, send, write_route, client=None,
+                  oracle_headers: Optional[Dict] = None):
+        """Fabrique un investigator à partir du modèle sémantique : les oracles de
+        relecture sont déduits de la carte écriture↔lecture du modèle."""
+        reads = api_model.readback_for(write_route)
+        return cls(send, client=client,
+                   oracle_candidates=[r.sample_url for r in reads],
+                   oracle_headers=oracle_headers,
+                   api_model=api_model, resource=write_route.resource)
 
     # --- 1. Le plan : jugement (IA) avec repli déterministe -------------------
     def plan(self, target: Dict, base_body: Dict) -> ConfirmationPlan:
@@ -89,8 +108,13 @@ class MassAssignmentInvestigator:
         """Heuristique : oracle = un endpoint « debug » ou de collection ; identité
         = première clé plausible du corps ; effet = le champ injecté lui-même."""
         oracle = self._pick_oracle_offline()
-        identity = next((k for k in _IDENTITY_KEYS if k in base_body),
-                        next(iter(base_body), 'id'))
+        # Clé d'identité : le modèle sémantique en priorité (déduite des corps
+        # observés pour cette ressource), sinon la première clé plausible du corps.
+        identity = None
+        if self.api_model is not None and self.resource:
+            identity = self.api_model.identity_field_for(self.resource)
+        identity = identity or next((k for k in _IDENTITY_KEYS if k in base_body),
+                                    next(iter(base_body), 'id'))
         record_path = self._discover_record_path(oracle) if oracle else None
         return ConfirmationPlan(oracle_url=oracle or '', identity_field=identity,
                                 oracle_headers=dict(self.oracle_headers),

@@ -97,3 +97,37 @@ class TestLLMPlan:
         ex, vf, _ = inv.instrument(TARGET, BASE_BODY)
         f = AdaptiveMassAssignmentLoop(ex, verify_fn=vf).run(TARGET)
         assert "is_admin" not in [e["field"] for e in f.accepted_fields]
+
+
+class TestModelIntegration:
+    """L'investigator tire ses oracles du modèle sémantique (plus de devinette)."""
+
+    def test_for_route_derives_oracles_from_model(self):
+        import json
+        from modules.semantic.api_model import APIModel
+
+        base = "https://api.x/users/v1"
+        har = {"log": {"entries": [
+            {"request": {"method": "GET", "url": base, "headers": []},
+             "response": {"status": 200, "content": {"text": json.dumps({"users": []})}}},
+            {"request": {"method": "POST", "url": f"{base}/register", "headers": [],
+                         "postData": {"text": json.dumps(
+                             {"username": "n", "password": "p", "email": "e@x"})}},
+             "response": {"status": 200, "content": {"text": "{}"}}},
+            {"request": {"method": "GET", "url": f"{base}/_debug", "headers": []},
+             "response": {"status": 200, "content": {"text": json.dumps({"users": []})}}},
+        ]}}
+        model = APIModel.from_har(har)
+        write = model.routes["POST /users/v1/register"]
+
+        srv = FakeServer({"admin": "admin"})
+        inv = MassAssignmentInvestigator.for_route(model, srv.send, write)
+        # L'oracle _debug a été déduit du modèle, sans oracle_candidates explicite.
+        assert any("_debug" in u for u in inv.oracle_candidates)
+        target = {"url": write.sample_url, "method": "POST"}
+        base_body = {"username": "seed", "password": "x", "email": "seed@e.com"}
+        ex, vf, plan = inv.instrument(target, base_body)
+        assert plan.oracle_url.endswith("/_debug")
+        assert plan.identity_field == "username"   # déduit par le modèle
+        f = AdaptiveMassAssignmentLoop(ex, verify_fn=vf).run(target)
+        assert [e["field"] for e in f.accepted_fields] == ["admin"]
