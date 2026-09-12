@@ -51,6 +51,10 @@ _ACTIONS = {'login', 'logout', 'search', 'reset', 'refresh',
             'verify', 'activate', 'createdb', 'upload', 'download'}
 # Clés candidates pour l'identité d'un objet (ce qu'on contrôle et qui est ré-exposé).
 _IDENTITY_KEYS = ('username', 'user', 'login', 'id', 'uuid', 'email', 'name', 'slug')
+# Clés qui trahissent le PROPRIÉTAIRE d'un objet (clé du BOLA : un objet renvoyé
+# à B mais dont ce champ nomme A prouve la fuite d'accès).
+_OWNERSHIP_KEYS = ('owner', 'user_id', 'userid', 'user', 'username', 'author',
+                   'account', 'account_id', 'created_by', 'uid', 'owner_id')
 
 
 def route_is_sensitive(path: str) -> bool:
@@ -250,6 +254,22 @@ class APIModel:
             if cand in keys:
                 return cand
         return None
+
+    def ownership_field_for(self, resource: str) -> Optional[str]:
+        """Champ de réponse désignant le propriétaire d'un objet de la ressource.
+        Sert au BOLA : si B reçoit un objet dont ce champ nomme A, l'accès a fui."""
+        keys: List[str] = []
+        for r in self.routes_for(resource):
+            keys.extend(r.resp_keys)
+        low = {k.lower(): k for k in keys}
+        for cand in _OWNERSHIP_KEYS:
+            if cand in low:
+                return low[cand]
+        return None
+
+    def item_routes(self) -> List[RouteInfo]:
+        """Routes d'accès à un objet précis (surface BOLA)."""
+        return [r for r in self.routes.values() if r.is_item]
 
     # --- enrichissement IA optionnel -----------------------------------------
     def enrich_semantics(self, client) -> None:
