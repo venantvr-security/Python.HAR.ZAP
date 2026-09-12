@@ -16,7 +16,7 @@ L'exécuteur HTTP est injecté (`execute_fn(url, method, headers)`), donc testab
 hors-ligne et routable à travers ZAP en production.
 """
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from .utils import get_logger
 from .regression_gate import endpoint_template
@@ -132,10 +132,20 @@ def run_matrix(roles: List[Role], endpoints: List[Endpoint],
     for ep in endpoints:
         cells: Dict[str, int] = {}
         requires_role = roles[ep.min_priv].name if ep.min_priv < len(roles) else '?'
+        statuses = [results.get((ep.template, r.name), 0) for r in roles]
+        # Un endpoint n'est une VRAIE frontière d'autorisation que si :
+        #  - on a la PREUVE qu'il applique un contrôle (un rôle a reçu 401/403), OU
+        #  - le modèle sémantique le juge SENSIBLE (route _debug/admin/config…).
+        # Sinon, un rôle plus bas qui l'atteint n'est pas une percée mais un
+        # endpoint simplement public (liste ouverte) → on ne le signale pas.
+        # C'est ce qui élimine les faux positifs « anon atteint une liste publique »
+        # sans manquer les vraies percées (l'objet d'autrui, l'endpoint sensible).
+        protected = any(s in (401, 403) for s in statuses)
+        sensitive = _endpoint_sensitive(ep)
         for role in roles:
             status = results.get((ep.template, role.name), 0)
             cells[role.name] = status
-            if 200 <= status < 300 and role.priv < ep.min_priv:
+            if 200 <= status < 300 and role.priv < ep.min_priv and (protected or sensitive):
                 matrix.violations.append(Violation(
                     endpoint=ep.template, method=ep.method, role=role.name,
                     requires_role=requires_role, status=status,
@@ -145,6 +155,17 @@ def run_matrix(roles: List[Role], endpoints: List[Endpoint],
         matrix.grid[ep.template] = cells
 
     return matrix
+
+
+def _endpoint_sensitive(ep: Endpoint) -> bool:
+    """Sensibilité de la route via le modèle sémantique (mots-clés de chemin)."""
+    try:
+        from .semantic.api_model import route_is_sensitive
+        # ep.template = "METHOD /chemin/templaté" → on isole le chemin.
+        path = ep.template.split(' ', 1)[-1]
+        return route_is_sensitive(path)
+    except Exception:
+        return False
 
 
 def render_matrix_cli(matrix: AccessMatrix, max_rows: int = 40) -> str:
