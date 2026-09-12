@@ -94,6 +94,13 @@ the CLI.
 
 More screens — Red Team, IDOR, Passive Scan — in the [UI tour](docs/UI.md).
 
+### The report
+
+Every run produces a findings-first report — severity-sorted, each finding with
+impact, a replayable curl proof, the fix, and its OWASP API tag:
+
+![HAR-ZAP findings-first report](docs/assets/findings-report.png)
+
 ## Observability (Grafana)
 
 Findings and request telemetry ship to a Loki + Prometheus + Grafana stack, with a
