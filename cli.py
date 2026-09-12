@@ -189,6 +189,12 @@ Examples:
                                   'exit 1 on any NEW finding vs this baseline')
     diag_parser.add_argument('--update-baseline', action='store_true',
                              help='Write current findings as the new --baseline (accepts current state)')
+    diag_parser.add_argument('--probes', action='store_true',
+                             help='Active probes: rate limiting (API4), SSRF (API7), auth checks (API2)')
+    diag_parser.add_argument('--openapi',
+                             help='OpenAPI spec (file/URL) to detect shadow endpoints (API9)')
+    diag_parser.add_argument('--chains', action='store_true',
+                             help='Compose exploit chains from the findings (LLM with --ai, else heuristic)')
     diag_parser.add_argument('--no-docker', action='store_true', help='Use existing ZAP')
     diag_parser.add_argument('--zap-url', default='http://localhost:8080', help='ZAP URL')
     diag_parser.add_argument('--api-key', help='ZAP API key')
@@ -851,6 +857,128 @@ def run_advanced(args):
     return 0
 
 
+def _diag_http_get(zap_client, auth):
+    """Exécuteur GET (url, method) via ZAP si dispo, sinon requests direct."""
+    if zap_client is not None:
+        def get(url, method='GET'):
+            r = zap_client.request(method, url, headers=auth, follow_redirects=False)
+            return {'status': r.status_code, 'content_length': len(r.content or b''),
+                    'body': (r.text or '')[:2000]}
+        return get
+    import requests
+
+    def get(url, method='GET'):
+        try:
+            r = requests.request(method, url, headers=auth, timeout=10,
+                                 verify=False, allow_redirects=False)
+            return {'status': r.status_code, 'content_length': len(r.content), 'body': r.text[:2000]}
+        except Exception:
+            return {'status': 0, 'content_length': 0, 'body': ''}
+    return get
+
+
+def _run_active_probes(har_data, config, args, zap_client):
+    """Sondes API2/API4/API7. auth = statique ; rate-limit/SSRF = via exécuteur."""
+    from modules.active_probes import probe_auth, probe_rate_limit, probe_ssrf
+    from modules.adaptive_campaign import get_targets
+    from modules.idor_detector import IDORDetector
+    from modules.llm.adaptive_idor import client_from_config
+
+    out = [pf.flat() for pf in probe_auth(har_data)]   # API2 — sans réseau
+
+    auth = IDORDetector.extract_auth_tokens(har_data) or {}
+    get = _diag_http_get(zap_client, auth)
+    targets = get_targets(har_data, limit=8)
+    # API4 : rate-limit sur le premier endpoint GET (borné pour ne pas noyer la cible).
+    if targets:
+        f = probe_rate_limit(get, targets[0]['url'], targets[0].get('method', 'GET'), burst=15)
+        if f:
+            out.append(f.flat())
+    # API7 : SSRF sur les endpoints aux paramètres url-ish.
+    adjud = client_from_config(config) if getattr(args, 'ai', False) else None
+    ssrf_adj = _OwaspAdj(adjud) if adjud else None
+    for f in probe_ssrf(lambda u, m='GET': get(u, m), targets, adjudicator=ssrf_adj):
+        out.append(f.flat())
+    if out:
+        print(f"[PROBES] {len(out)} finding(s) (auth/rate-limit/ssrf)")
+    return out
+
+
+class _OwaspAdj:
+    """Petit adaptateur : expose classify_owasp via le LLMClient partagé."""
+    def __init__(self, client):
+        self.client = client
+    @property
+    def available(self):
+        return self.client is not None
+    def classify_owasp(self, alert, categories):
+        from modules.owasp_mapper import OWASPLLMClassifier
+        clf = OWASPLLMClassifier.__new__(OWASPLLMClassifier)
+        clf._client = self.client
+        return clf.classify_owasp(alert, categories)
+
+
+def _run_shadow_endpoints(har_data, args, config):
+    """Diff HAR ↔ OpenAPI → endpoints fantômes (API9)."""
+    from modules.openapi_importer import OpenAPIImporter
+    from modules.shadow_endpoints import find_shadow_endpoints, shadow_findings_flat
+    imp = OpenAPIImporter()
+    try:
+        if args.openapi.startswith('http'):
+            imp.load_from_url(args.openapi)
+        else:
+            imp.load_from_file(args.openapi)
+        spec_eps = imp.parse_endpoints()
+    except Exception as e:
+        print(f"[SHADOW] could not load OpenAPI spec: {e}")
+        return []
+    findings = find_shadow_endpoints(har_data, spec_eps)
+    flat = shadow_findings_flat(findings)
+    print(f"[SHADOW] {len(flat)} undocumented endpoint(s) vs spec")
+    return flat
+
+
+def _run_coverage(har_data, all_findings, adaptive_result, args, report):
+    from modules.coverage import build_coverage, render_cli
+    from modules.regression_gate import endpoint_template
+    from modules.adaptive_campaign import id_targets, mutation_targets, get_targets
+
+    tested = set()
+    for f in all_findings:
+        if f.get('url'):
+            m = f.get('method', 'GET')
+            tested.add(f"{m} {endpoint_template(f['url'])}")
+    categories = {'API8'}  # le passif tourne toujours
+    if adaptive_result is not None:
+        categories |= {'API1', 'API3', 'API5'}
+        for t in id_targets(har_data) + mutation_targets(har_data) + get_targets(har_data):
+            tested.add(f"{t.get('method', 'GET')} {endpoint_template(t['url'])}")
+    if getattr(args, 'probes', False):
+        categories |= {'API2', 'API4', 'API7'}
+    if getattr(args, 'openapi', None):
+        categories |= {'API9'}
+    rep = build_coverage(har_data, tested, categories)
+    report['coverage'] = rep.to_dict()
+    print(render_cli(rep))
+
+
+def _run_exploit_chains(all_findings, adaptive_result, args, config, report):
+    from modules.llm.exploit_chainer import compose_chains
+    from modules.llm.adaptive_idor import client_from_config
+    from modules.regression_gate import normalize_adaptive
+    findings = list(all_findings) + normalize_adaptive(adaptive_result)
+    client = client_from_config(config) if getattr(args, 'ai', False) else None
+    chains = compose_chains(findings, client=client)
+    report['exploit_chains'] = [c.to_dict() for c in chains]
+    if chains:
+        print(f"\n{'='*56}\nEXPLOIT CHAINS ({len(chains)})\n{'='*56}")
+        for c in chains:
+            print(f"\n[{c.source}] {c.title}  (confidence {c.confidence})")
+            for i, s in enumerate(c.steps, 1):
+                print(f"  {i}. {s}")
+            print(f"  → {c.rationale}")
+
+
 def _run_regression_gate(all_findings, adaptive_result, args, report):
     """Compare les findings au baseline et échoue sur du nouveau. Écrit le verdict
     dans le rapport et met à jour le baseline si --update-baseline."""
@@ -1170,6 +1298,14 @@ def run_diagnose(args):
             with open(json_path, 'w') as f:
                 json.dump(report, f, indent=2)
 
+        # Active probes (API4 rate-limit, API7 SSRF, API2 auth) — append to findings.
+        if getattr(args, 'probes', False):
+            all_findings.extend(_run_active_probes(har_data, config, args, zap_client))
+
+        # Shadow endpoints (API9) — HAR vs OpenAPI spec diff.
+        if getattr(args, 'openapi', None):
+            all_findings.extend(_run_shadow_endpoints(har_data, args, config))
+
         # Security-regression gate: fail only on findings NEW vs the baseline.
         gate_result = None
         if getattr(args, 'baseline', None):
@@ -1190,6 +1326,16 @@ def run_diagnose(args):
             html_path.write_text(render_html(unified, {'target': args.target,
                                                        'har_file': args.har_file}))
             print(f"Findings-first report: {html_path}")
+
+        # Honest coverage report (deterministic) — what was actually tested.
+        _run_coverage(har_data, all_findings, adaptive_result, args, report)
+
+        # Exploit chains (LLM with --ai, else deterministic combos).
+        if getattr(args, 'chains', False):
+            _run_exploit_chains(all_findings, adaptive_result, args, config, report)
+
+        with open(json_path, 'w') as f:
+            json.dump(report, f, indent=2)
 
         # OWASP API Top 10 compliance from the full finding set
         if getattr(args, 'owasp_api', False):
