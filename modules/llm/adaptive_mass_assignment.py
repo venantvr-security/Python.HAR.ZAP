@@ -75,6 +75,16 @@ class MAFinding:
     def vulnerable(self) -> bool:
         return bool(self.accepted_fields)
 
+    def verdicts(self):
+        """Résultats dans le vocabulaire commun (modules.llm.investigation) :
+        champs confirmés = CONFIRMED, champs seulement suspectés = SUSPECTED."""
+        from .investigation import Verdict, CONFIRMED, SUSPECTED
+        out = [Verdict(CONFIRMED, f"field '{e['field']}' accepted: {e.get('reason', '')}",
+                       0.9, "deterministic") for e in self.accepted_fields]
+        out += [Verdict(SUSPECTED, f"field '{e['field']}' unconfirmed: {e.get('reason', '')}",
+                        0.5, "deterministic") for e in self.suspected_fields]
+        return out
+
 
 class AdaptiveMassAssignmentLoop:
     """Découverte adaptative des champs d'affectation de masse acceptés."""

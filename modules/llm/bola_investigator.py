@@ -57,6 +57,16 @@ class BolaFinding:
                         f"{self.owner or 'another user'}",
                 'url': self.object_url}
 
+    @property
+    def verdict(self):
+        """Vocabulaire commun (modules.llm.investigation)."""
+        from .investigation import Verdict, Evidence, CONFIRMED, SUSPECTED
+        status = CONFIRMED if (self.confirmed and self.source != "suspected") else SUSPECTED
+        return Verdict(status, self.reason, 0.9 if status == CONFIRMED else 0.5,
+                       "llm" if self.source == "llm" else "deterministic",
+                       Evidence(request=f"GET {self.object_url} as {self.attacker}",
+                                response=f"status={self.status}", note=self.reason))
+
 
 class BolaInvestigator:
     def __init__(self, send: SendFn, api_model=None, client=None):
