@@ -37,10 +37,21 @@ class ProbeFinding:
     title: str
     url: str
     detail: str = ''
+    source: str = 'deterministic'   # 'deterministic' (marqueur) | 'llm' (adjugé)
+    confidence: float = 0.9
 
     def flat(self) -> Dict:
         return {'source': f'probe_{self.category.lower()}', 'risk': self.severity,
                 'name': self.title, 'url': self.url}
+
+    @property
+    def verdict(self):
+        """Vocabulaire commun (modules.llm.investigation). Un marqueur non
+        ambigu = CONFIRMED ; une adjudication LLM = SUSPECTED (à marquer)."""
+        from .llm.investigation import Verdict, Evidence, CONFIRMED, SUSPECTED
+        status = CONFIRMED if self.source == 'deterministic' else SUSPECTED
+        return Verdict(status, self.detail or self.title, self.confidence, self.source,
+                       Evidence(request=self.url, note=self.detail))
 
 
 # =============================================================================
@@ -99,7 +110,7 @@ def probe_ssrf(execute_fn: Callable[[str, str], Dict], targets: List[Dict],
                     if v:
                         findings.append(ProbeFinding('API7', 'High',
                             f"SSRF suspected via '{param}' (LLM-adjudicated)",
-                            probe_url, v.get('reason', '')))
+                            probe_url, v.get('reason', ''), source='llm', confidence=0.6))
                         break
     return findings
 
