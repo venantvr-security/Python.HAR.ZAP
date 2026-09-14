@@ -958,6 +958,21 @@ def run_advanced(args):
     return 0
 
 
+def _zap_reachable(zap_url, timeout=1.5):
+    """Sonde TCP rapide : le proxy ZAP écoute-t-il vraiment ? Évite de router les
+    moteurs actifs vers un proxy mort (qui renverrait 0 partout, silencieusement)."""
+    import socket
+    from urllib.parse import urlparse
+    p = urlparse(zap_url)
+    host = p.hostname or 'localhost'
+    port = p.port or (443 if p.scheme == 'https' else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _diag_http_get(zap_client, auth):
     """Exécuteur GET (url, method) via ZAP si dispo, sinon requests direct."""
     if zap_client is not None:
@@ -981,7 +996,7 @@ def _diag_http_get(zap_client, auth):
 def _run_active_probes(har_data, config, args, zap_client):
     """Sondes API2/API4/API7. auth = statique ; rate-limit/SSRF = via exécuteur."""
     from modules.active_probes import probe_auth, probe_rate_limit, probe_ssrf
-    from modules.adaptive_campaign import get_targets
+    from modules.llm.adaptive_campaign import get_targets
     from modules.idor_detector import IDORDetector
     from modules.llm.adaptive_idor import client_from_config
 
@@ -1105,7 +1120,7 @@ def _run_shadow_endpoints(har_data, args, config):
 def _run_coverage(har_data, all_findings, adaptive_result, args, report):
     from modules.coverage import build_coverage, render_cli
     from modules.regression_gate import endpoint_template
-    from modules.adaptive_campaign import id_targets, mutation_targets, get_targets
+    from modules.llm.adaptive_campaign import id_targets, mutation_targets, get_targets
 
     tested = set()
     for f in all_findings:
@@ -1342,8 +1357,18 @@ def run_diagnose(args):
             zap_url = args.zap_url
             api_key = args.api_key or ''
 
+        # Transport des moteurs actifs (adaptive/probes/investigate/business-flow) :
+        # on ne route par ZAP QUE si le proxy répond vraiment. `--zap-url` a une
+        # valeur par défaut (localhost:8080) ; sans sonde d'accessibilité, un
+        # ZAPHttpClient pointant vers un proxy mort renverrait 0 partout et
+        # neutraliserait silencieusement toute la détection. zap_client=None fait
+        # basculer chaque moteur sur `requests` en direct (fallback déjà prévu).
         from modules.zap_http_client import ZAPHttpClient
-        zap_client = ZAPHttpClient(zap_url=zap_url, api_key=api_key)
+        if zap_url and _zap_reachable(zap_url):
+            zap_client = ZAPHttpClient(zap_url=zap_url, api_key=api_key)
+        else:
+            zap_client = None
+            print("  No reachable ZAP proxy — active engines use direct HTTP transport")
 
         # ZAP Active Scan
         if not args.skip_zap:
