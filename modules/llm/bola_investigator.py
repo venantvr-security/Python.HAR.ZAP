@@ -52,10 +52,11 @@ class BolaFinding:
     severity: str = "High"
 
     def flat(self) -> Dict:
+        v = self.verdict
         return {'source': 'bola', 'risk': self.severity,
                 'name': f"BOLA — {self.attacker} reads object owned by "
                         f"{self.owner or 'another user'}",
-                'url': self.object_url}
+                'url': self.object_url, 'status': v.status, 'adjudication': v.source}
 
     @property
     def verdict(self):

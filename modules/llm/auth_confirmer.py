@@ -73,7 +73,8 @@ class AuthFinding:
 
     def flat(self) -> Dict:
         return {'source': 'auth_confirmer', 'risk': 'Critical',
-                'name': f"JWT bypass via {self.technique} accepted", 'url': self.url}
+                'name': f"JWT bypass via {self.technique} accepted", 'url': self.url,
+                'status': self.verdict.status, 'adjudication': self.verdict.source}
 
 
 class AuthConfirmer:

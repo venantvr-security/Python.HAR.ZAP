@@ -90,3 +90,40 @@ class TestRender:
         h = render_html(build_findings(FLAT, _Res()), {'target': 'https://api.x'})
         assert '<title>' in h and 'API1:2023' in h and 'curl -i -s' in h
         assert 'BOLA' in h and 'PATCH' in h
+
+
+class TestVerdictStatus:
+    def test_status_propagates_from_flat(self):
+        flat = [
+            {'source': 'bola', 'risk': 'High', 'name': 'BOLA conf', 'url': 'http://t/a',
+             'status': 'confirmed', 'adjudication': 'deterministic'},
+            {'source': 'probe_api7', 'risk': 'High', 'name': 'SSRF susp', 'url': 'http://t/b',
+             'status': 'suspected', 'adjudication': 'llm'},
+        ]
+        fs = build_findings(flat)
+        by = {f.title: f for f in fs}
+        assert by['BOLA conf'].status == 'confirmed'
+        assert by['SSRF susp'].status == 'suspected' and by['SSRF susp'].adjudication == 'llm'
+
+    def test_confirmed_sorts_before_suspected(self):
+        flat = [
+            {'source': 'x', 'risk': 'High', 'name': 'susp', 'url': 'u', 'status': 'suspected'},
+            {'source': 'x', 'risk': 'High', 'name': 'conf', 'url': 'u', 'status': 'confirmed'},
+        ]
+        fs = build_findings(flat)
+        assert [f.status for f in fs] == ['confirmed', 'suspected']
+
+    def test_cli_marks_suspected(self):
+        flat = [{'source': 'x', 'risk': 'High', 'name': 'n', 'url': 'u', 'status': 'suspected'}]
+        out = render_cli(build_findings(flat))
+        assert 'SUSPECTED' in out
+
+    def test_html_shows_verdict_badge(self):
+        flat = [{'source': 'x', 'risk': 'High', 'name': 'n', 'url': 'u',
+                 'status': 'suspected', 'adjudication': 'llm'}]
+        h = render_html(build_findings(flat))
+        assert 'verdict' in h and 'SUSPECTED' in h
+
+    def test_default_status_confirmed(self):
+        flat = [{'source': 'x', 'risk': 'High', 'name': 'n', 'url': 'u'}]
+        assert build_findings(flat)[0].status == 'confirmed'
