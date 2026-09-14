@@ -161,6 +161,57 @@ class TestCSVInjection:
         assert probe_csv_injection(har) == []
 
 
+class _Adjud:
+    """Adjudicateur IA simulé : disponible et qui valide tout near-miss."""
+    available = True
+    def classify_owasp(self, alert, categories):
+        return {'reason': 'LLM says plausible'}
+
+
+class _AdjudNo:
+    available = True
+    def classify_owasp(self, alert, categories):
+        return None
+
+
+class TestSuspectedTier:
+    def test_lfi_near_miss_needs_adjudicator(self):
+        # réponse « fs-like » (pas le marqueur strict root:x:...:0:0)
+        def srv(url, method, body=None):
+            return {'status': 200, 'body': 'daemon:x:1:1:daemon', 'content_type': 'text/plain'}
+        tgt = [{'url': 'https://x/media/raw?path=a', 'method': 'GET'}]
+        # sans IA : rien (pas de FP)
+        assert probe_path_traversal(srv, tgt) == []
+        # avec IA : un SUSPECTED
+        fs = probe_path_traversal(srv, tgt, adjudicator=_Adjud())
+        assert fs and fs[0].source == 'llm' and 'suspected' in fs[0].title.lower()
+        assert fs[0].flat()['status'] == 'suspected'
+
+    def test_adjudicator_can_reject(self):
+        def srv(url, method, body=None):
+            return {'status': 200, 'body': 'daemon:x:1:1', 'content_type': 'text/plain'}
+        tgt = [{'url': 'https://x/media/raw?path=a', 'method': 'GET'}]
+        assert probe_path_traversal(srv, tgt, adjudicator=_AdjudNo()) == []
+
+    def test_ssti_near_miss(self):
+        def srv(url, method, body=None):
+            return _json('{"rendered":"jinja2.exceptions.TemplateSyntaxError"}')
+        tgt = [{'url': 'https://x/preview', 'method': 'POST', 'body': {'template': 'x'}}]
+        assert probe_ssti(srv, tgt) == []
+        fs = probe_ssti(srv, tgt, adjudicator=_Adjud())
+        assert fs and fs[0].flat()['status'] == 'suspected'
+
+    def test_reset_near_miss_numeric_token(self):
+        def srv(url, method, body=None):
+            return _json(json.dumps({'reset_token': '100042'}))  # numérique, non-hash
+        har = {"log": {"entries": [
+            {"request": {"method": "POST", "url": "https://x/forgot",
+                         "postData": {"text": json.dumps({"email": "a@b.c"})}}}]}}
+        assert probe_predictable_reset(srv, har) == []
+        fs = probe_predictable_reset(srv, har, adjudicator=_Adjud())
+        assert fs and fs[0].flat()['status'] == 'suspected'
+
+
 class TestOrchestrator:
     def test_flat_shape(self):
         def srv(url, method, body=None):

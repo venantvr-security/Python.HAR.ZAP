@@ -91,6 +91,30 @@ _REDIRECT_PAYLOADS = [f'https://{_EVIL_HOST}/', f'//{_EVIL_HOST}/',
 _RESET_HINT = re.compile(r'(reset|forgot|recover|password)', re.I)
 _FORMULA_LEAD = ('=', '+', '-', '@', '\t', '\r')
 
+# --- signaux de « near-miss » : le marqueur strict rate, mais la réponse a une
+# tête suspecte. Sans IA on ne remonte RIEN (pas de FP) ; avec un adjudicateur on
+# émet un finding SUSPECTED. C'est le tier que les moteurs déterministes jetaient.
+_LFI_SOFT = re.compile(r'(daemon:x:|/bin/(?:ba)?sh\b|\[boot loader\]|\[fonts\]|'
+                       r'<\?php|-----BEGIN [A-Z ]+PRIVATE KEY-----|for 16-bit app support)', re.I)
+_SSTI_SOFT = re.compile(r'(jinja2|twig|mako|velocity|freemarker|smarty|'
+                        r'templatesyntaxerror|template[^\n]{0,20}error|'
+                        r'traceback \(most recent call last\))', re.I)
+
+
+def _suspected(adjudicator, kind: str, owasp: str, url: str, payload: str,
+               body: str, reason_hint: str):
+    """Interroge l'adjudicateur IA sur un near-miss. Rend une raison (SUSPECTED)
+    ou None. Sans adjudicateur disponible → None (comportement offline inchangé)."""
+    if adjudicator is None or not getattr(adjudicator, 'available', False):
+        return None
+    verdict = adjudicator.classify_owasp(
+        {'alert': f'Possible {kind}: {reason_hint} (payload={payload})',
+         'url': url, 'evidence': (body or '')[:400]},
+        {owasp: kind})
+    if verdict:
+        return verdict.get('reason', reason_hint) if isinstance(verdict, dict) else reason_hint
+    return None
+
 
 # --- points d'injection (query + corps JSON) --------------------------------
 def _iter_string_leaves(obj, path=()) -> Iterator[Tuple[tuple, str]]:
@@ -173,42 +197,59 @@ def _get(execute_fn, url, method, body):
 # =============================================================================
 # Path traversal / LFI  (OWASP API mappe en API8/Misconfiguration côté DAST)
 # =============================================================================
-def probe_path_traversal(execute_fn: Callable, targets: List[Dict]) -> List[WebFinding]:
+def probe_path_traversal(execute_fn: Callable, targets: List[Dict],
+                         adjudicator=None) -> List[WebFinding]:
     findings: List[WebFinding] = []
     for t in targets:
         path_hint = _FILE_HINT.search(urlparse(t.get('url', '')).path or '')
+        confirmed = None
+        near = None
         for label, key, method, mutate in _points(t):
             if not (path_hint or _FILE_HINT.search(key)):
                 continue
             for payload in _LFI_PAYLOADS:
                 probe_url, probe_body = mutate(payload)
                 r = _get(execute_fn, probe_url, method, probe_body)
-                if _LFI_MARKER.search(r.get('body', '') or ''):
-                    findings.append(WebFinding('LFI', 'API8:2023', 'Critical',
+                body = r.get('body', '') or ''
+                if _LFI_MARKER.search(body):
+                    confirmed = WebFinding('LFI', 'API8:2023', 'Critical',
                         f"Path traversal — arbitrary file read via {label}",
-                        probe_url, f"payload {payload} leaked /etc/passwd", payload=payload))
+                        probe_url, f"payload {payload} leaked /etc/passwd", payload=payload)
                     break
-            else:
-                continue
-            break  # une preuve par cible suffit
+                if near is None and _LFI_SOFT.search(body):
+                    near = (label, probe_url, payload, body)
+            if confirmed:
+                break
+        if confirmed:
+            findings.append(confirmed)
+        elif near:
+            lb, u, pl, bd = near
+            reason = _suspected(adjudicator, 'path traversal', 'API8:2023', u, pl, bd,
+                                'file-system-like content returned')
+            if reason:
+                findings.append(WebFinding('LFI', 'API8:2023', 'High',
+                    f"Path traversal suspected via {lb} (LLM-adjudicated)",
+                    u, reason, source='llm', confidence=0.5, payload=pl))
     return findings
 
 
 # =============================================================================
 # SSTI — Server-Side Template Injection
 # =============================================================================
-def probe_ssti(execute_fn: Callable, targets: List[Dict]) -> List[WebFinding]:
+def probe_ssti(execute_fn: Callable, targets: List[Dict],
+               adjudicator=None) -> List[WebFinding]:
     findings: List[WebFinding] = []
     for t in targets:
         for label, key, method, mutate in _points(t):
-            hit = _ssti_point(execute_fn, method, mutate, label)
+            hit = _ssti_point(execute_fn, method, mutate, label, adjudicator)
             if hit:
                 findings.append(hit)
                 break
     return findings
 
 
-def _ssti_point(execute_fn, method, mutate, label) -> Optional[WebFinding]:
+def _ssti_point(execute_fn, method, mutate, label, adjudicator=None) -> Optional[WebFinding]:
+    near = None
     # 1) évaluation arithmétique (Jinja2/Twig/Freemarker/ERB/Velocity…)
     for payload, marker in _SSTI_ARITH:
         if marker is None:
@@ -220,6 +261,8 @@ def _ssti_point(execute_fn, method, mutate, label) -> Optional[WebFinding]:
             return WebFinding('SSTI', 'API8:2023', 'Critical',
                 f"SSTI — template expression evaluated via {label}",
                 probe_url, f"{payload} rendered as {marker}", payload=payload)
+        if near is None and _SSTI_SOFT.search(body):
+            near = (probe_url, payload, body)
     # 2) fuite de variable de contexte (python str.format)
     for payload in _SSTI_CTX_VARS:
         probe_url, probe_body = mutate(payload)
@@ -229,6 +272,17 @@ def _ssti_point(execute_fn, method, mutate, label) -> Optional[WebFinding]:
             return WebFinding('SSTI', 'API8:2023', 'Critical',
                 f"SSTI — context/config leaked via {label}",
                 probe_url, f"{payload} expanded to sensitive content", payload=payload)
+        if near is None and _SSTI_SOFT.search(body):
+            near = (probe_url, payload, body)
+    # 3) near-miss : signature de moteur de template -> adjudication IA (SUSPECTED)
+    if near:
+        u, pl, bd = near
+        reason = _suspected(adjudicator, 'SSTI', 'API8:2023', u, pl, bd,
+                            'template-engine error signature in response')
+        if reason:
+            return WebFinding('SSTI', 'API8:2023', 'High',
+                f"SSTI suspected via {label} (LLM-adjudicated)",
+                u, reason, source='llm', confidence=0.5, payload=pl)
     return None
 
 
@@ -316,38 +370,55 @@ def _get_urls(har_data: Dict) -> List[str]:
 # =============================================================================
 # Open redirect
 # =============================================================================
-def probe_open_redirect(execute_fn: Callable, targets: List[Dict]) -> List[WebFinding]:
+def probe_open_redirect(execute_fn: Callable, targets: List[Dict],
+                        adjudicator=None) -> List[WebFinding]:
     findings: List[WebFinding] = []
     for t in targets:
         for label, key, method, mutate in _points(t):
             if not _REDIRECT_HINT.search(key):
                 continue
             hit = None
+            near = None
             for payload in _REDIRECT_PAYLOADS:
                 probe_url, probe_body = mutate(payload)
                 r = _get(execute_fn, probe_url, method, probe_body)
                 loc = (r.get('location', '') or '')
+                body = (r.get('body', '') or '')
                 status = int(r.get('status', 0))
                 if 300 <= status < 400 and _EVIL_HOST in loc:
                     hit = WebFinding('OPEN_REDIRECT', 'API8:2023', 'Medium',
                         f"Open redirect — Location to attacker host via {label}",
                         probe_url, f"{status} Location: {loc}", payload=payload)
                     break
-                if _EVIL_HOST in (r.get('body', '') or '') and 'refresh' in (r.get('body', '') or '').lower():
+                if _EVIL_HOST in body and 'refresh' in body.lower():
                     hit = WebFinding('OPEN_REDIRECT', 'API8:2023', 'Medium',
                         f"Open redirect — meta/JS redirect to attacker host via {label}",
                         probe_url, "attacker host in refresh/location", payload=payload)
                     break
+                # near-miss : l'hôte attaquant est réfléchi (lien/JS) mais sans
+                # redirection franche -> peut être un redirect côté client.
+                if near is None and _EVIL_HOST in body:
+                    near = (probe_url, payload, body)
             if hit:
                 findings.append(hit)
                 break
+            if near:
+                u, pl, bd = near
+                reason = _suspected(adjudicator, 'open redirect', 'API8:2023', u, pl, bd,
+                                    'attacker host reflected without a clear server redirect')
+                if reason:
+                    findings.append(WebFinding('OPEN_REDIRECT', 'API8:2023', 'Low',
+                        f"Open redirect suspected via {label} (LLM-adjudicated)",
+                        u, reason, source='llm', confidence=0.5, payload=pl))
+                    break
     return findings
 
 
 # =============================================================================
 # Jeton de reset prédictible  (API2 — Broken Authentication)
 # =============================================================================
-def probe_predictable_reset(execute_fn: Callable, har_data: Dict) -> List[WebFinding]:
+def probe_predictable_reset(execute_fn: Callable, har_data: Dict,
+                            adjudicator=None) -> List[WebFinding]:
     findings: List[WebFinding] = []
     for e in (har_data or {}).get('log', {}).get('entries', []) or []:
         req = e.get('request', {})
@@ -364,11 +435,36 @@ def probe_predictable_reset(execute_fn: Callable, har_data: Dict) -> List[WebFin
             continue
         r = _get(execute_fn, url, req.get('method', 'POST').upper(), body)
         token = _extract_token(r.get('body', '') or '')
-        if token and _token_is_predictable(token, str(ident)):
+        if not token:
+            continue
+        if _token_is_predictable(token, str(ident)):
             findings.append(WebFinding('WEAK_RESET', 'API2:2023', 'High',
                 f"Predictable reset token derived from public identifier ('{ident}')",
                 url, f"token '{token}' matches a hash/encoding of the identifier"))
+        elif _token_looks_weak(token, str(ident)):
+            # near-miss : jeton court/à faible entropie non couvert par nos hashes
+            # -> l'IA juge s'il est plausiblement dérivable (SUSPECTED).
+            reason = _suspected(adjudicator, 'predictable reset token', 'API2:2023',
+                                url, str(ident), token,
+                                'reset token is short/low-entropy, may be derivable')
+            if reason:
+                findings.append(WebFinding('WEAK_RESET', 'API2:2023', 'Medium',
+                    f"Reset token possibly predictable for '{ident}' (LLM-adjudicated)",
+                    url, reason, source='llm', confidence=0.5))
     return findings
+
+
+def _token_looks_weak(token: str, ident: str) -> bool:
+    """Signal de near-miss : jeton court, purement hex/numérique, ou contenant
+    l'identifiant — sans correspondre à un hash connu."""
+    t = token.strip()
+    if ident.lower() in t.lower():
+        return True
+    if len(t) <= 12 and re.fullmatch(r'[0-9a-fA-F]+', t):
+        return True
+    if re.fullmatch(r'\d+', t):                 # jeton purement numérique (séquentiel ?)
+        return True
+    return False
 
 
 def _extract_token(body: str) -> Optional[str]:
@@ -426,16 +522,21 @@ def probe_csv_injection(har_data: Dict) -> List[WebFinding]:
 # Orchestrateur
 # =============================================================================
 def run_web_probes(execute_fn: Callable, har_data: Dict,
-                   targets: Optional[List[Dict]] = None) -> List[Dict]:
-    """Lance toutes les sondes « angles morts » et rend des findings à plat."""
+                   targets: Optional[List[Dict]] = None,
+                   adjudicator=None) -> List[Dict]:
+    """Lance toutes les sondes « angles morts » et rend des findings à plat.
+
+    L'adjudicateur IA (optionnel) n'ajoute que des findings SUSPECTED sur les
+    near-miss (marqueur strict raté, réponse suspecte) : sans lui, comportement
+    déterministe strictement inchangé (aucun FP)."""
     targets = targets if targets is not None else injectable_targets(har_data)
     out: List[WebFinding] = []
-    out += probe_path_traversal(execute_fn, targets)
-    out += probe_ssti(execute_fn, targets)
+    out += probe_path_traversal(execute_fn, targets, adjudicator=adjudicator)
+    out += probe_ssti(execute_fn, targets, adjudicator=adjudicator)
     out += probe_reflected_xss(execute_fn, targets)
-    out += probe_open_redirect(execute_fn, targets)
+    out += probe_open_redirect(execute_fn, targets, adjudicator=adjudicator)
     out += probe_stored_xss(execute_fn, har_data)
-    out += probe_predictable_reset(execute_fn, har_data)
+    out += probe_predictable_reset(execute_fn, har_data, adjudicator=adjudicator)
     out += probe_csv_injection(har_data)
     flat = [f.flat() for f in out]
     logger.info("web_probes_done", findings=len(flat))
