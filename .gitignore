@@ -35,3 +35,9 @@ output/
 # LLM sessions (keep only one example)
 patterns/sessions/*
 !patterns/sessions/2026-03-19_20-36-52_e-commerce/
+
+# ZAP export wordlists : régénérés à chaque scan (garder seulement un exemple)
+patterns/zap_export/fuzzers/*
+!patterns/zap_export/fuzzers/llm_mass_assignment.txt
+patterns/zap_export/custom_payloads/*
+!patterns/zap_export/custom_payloads/llm_regex.json
