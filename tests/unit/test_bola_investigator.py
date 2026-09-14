@@ -129,3 +129,21 @@ class TestProtectedGate:
         f = BolaInvestigator(OwnedServer(OBJECTS).send).probe(
             list(OBJECTS), SESSIONS, ownership_field="owner")
         assert any(x.verdict.status == "confirmed" for x in f)
+
+
+class TestCallerSpecificEndpoint:
+    """Régression : un endpoint qui renvoie à chacun SON objet (owner==caller)
+    ne doit produire aucun BOLA (pas d'attribution globale erronée)."""
+
+    def test_no_finding_when_each_sees_own(self):
+        def caller_specific(m, u, headers=None):
+            who = {"N1": "name1", "N2": "name2"}.get((headers or {}).get("Authorization"))
+            if not who:
+                return {"status": 401, "body": "{}"}
+            return {"status": 200, "body": json.dumps({"id": 1, "owner": who})}
+        f = BolaInvestigator(caller_specific).probe(
+            ["https://api/me/1"],
+            [Session("name1", {"Authorization": "N1"}, "name1"),
+             Session("name2", {"Authorization": "N2"}, "name2")],
+            ownership_field="owner")
+        assert f == []

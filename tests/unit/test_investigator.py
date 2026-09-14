@@ -131,3 +131,38 @@ class TestModelIntegration:
         assert plan.identity_field == "username"   # déduit par le modèle
         f = AdaptiveMassAssignmentLoop(ex, verify_fn=vf).run(target)
         assert [e["field"] for e in f.accepted_fields] == ["admin"]
+
+
+class TestMultiOracleVerify:
+    """Régression : si l'oracle primaire cache le champ injecté, un second
+    oracle qui l'expose confirme quand même (moins de faux négatifs)."""
+
+    def test_second_oracle_confirms(self):
+        import json as _j
+        from modules.llm.investigator import ConfirmationPlan
+        from modules.llm.adaptive_mass_assignment import AdaptiveMassAssignmentLoop
+        store = []
+
+        def send(m, u, headers=None, json_body=None):
+            if m == "POST":
+                rec = {"username": json_body["username"]}
+                if json_body.get("admin"):
+                    rec["admin"] = True
+                store.append(rec)
+                return {"status": 200, "body": "{}"}
+            if u.endswith("/users"):       # liste : cache 'admin'
+                return {"status": 200, "body": _j.dumps(
+                    {"users": [{"username": r["username"]} for r in store]})}
+            if u.endswith("/_debug"):      # debug : expose 'admin'
+                return {"status": 200, "body": _j.dumps({"users": store})}
+            return {"status": 404, "body": "{}"}
+
+        inv = MassAssignmentInvestigator(
+            send, oracle_candidates=["https://api/users", "https://api/users/_debug"])
+        plan = ConfirmationPlan(oracle_url="https://api/users",
+                                identity_field="username", record_path="users")
+        ex, vf, _ = inv.instrument({"url": "https://api/users/register", "method": "POST"},
+                                   {"username": "seed", "password": "x"}, plan=plan)
+        f = AdaptiveMassAssignmentLoop(ex, verify_fn=vf).run(
+            {"url": "https://api/users/register", "method": "POST"})
+        assert "admin" in [e["field"] for e in f.accepted_fields]

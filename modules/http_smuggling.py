@@ -151,7 +151,7 @@ class HTTPSmugglingTester:
         request = self._build_raw_request(parsed.netloc, payload)
 
         # Send request
-        self._send_raw_request(host, port, request, use_ssl)
+        response = self._send_raw_request(host, port, request, use_ssl)
 
         if response is None:
             return None

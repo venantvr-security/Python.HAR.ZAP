@@ -25,7 +25,7 @@ class AdvancedZAPConfig:
     def _configure_form_auth(self, config: Dict):
         """Configure form-based authentication"""
         try:
-            self._get_or_create_context(config.get('context_name', 'Default'))
+            context_id = self._get_or_create_context(config.get('context_name', 'Default'))
 
             login_url = config.get('login_url')
             username_field = config.get('username_field', 'username')
