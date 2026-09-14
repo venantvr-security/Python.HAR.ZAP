@@ -56,6 +56,9 @@ def normalize_diag_findings(all_findings: List[Dict]) -> List[Dict]:
             'endpoint': f.get('url', ''),
             'detail': f.get('name', ''),
             'severity': f.get('risk', 'Low'),
+            # Statut d'investigation (confirmé/suspecté) : porté jusqu'à la gate
+            # pour n'échouer que sur du nouveau CONFIRMÉ (le suspecté est bruit).
+            'status': f.get('status', 'confirmed'),
         })
     return out
 
@@ -76,7 +79,12 @@ def normalize_adaptive(result) -> List[Dict]:
     for f in getattr(result, 'mass_assignment', []) or []:
         for entry in getattr(f, 'accepted_fields', []) or []:
             out.append({'type': 'mass_assignment(API3)', 'endpoint': getattr(f, 'target_url', ''),
-                        'detail': entry.get('field', ''), 'severity': 'High'})
+                        'detail': entry.get('field', ''), 'severity': 'High',
+                        'status': 'confirmed'})
+        for entry in getattr(f, 'suspected_fields', []) or []:
+            out.append({'type': 'mass_assignment(API3)', 'endpoint': getattr(f, 'target_url', ''),
+                        'detail': entry.get('field', ''), 'severity': 'Low',
+                        'status': 'suspected'})
     for f in getattr(result, 'hidden_params', []) or []:
         for entry in getattr(f, 'active_params', []) or []:
             out.append({'type': 'hidden_params(API5)', 'endpoint': getattr(f, 'target_url', ''),
@@ -86,14 +94,20 @@ def normalize_adaptive(result) -> List[Dict]:
 
 @dataclass
 class GateResult:
-    new: List[Dict] = field(default_factory=list)
+    new: List[Dict] = field(default_factory=list)          # tous les nouveaux
+    new_suspected: List[Dict] = field(default_factory=list)  # sous-ensemble non confirmé
     fixed: List[str] = field(default_factory=list)      # signatures disparues
     unchanged: List[str] = field(default_factory=list)
     passed: bool = True
     baseline_updated: bool = False
 
+    @property
+    def new_confirmed(self) -> List[Dict]:
+        return [n for n in self.new if n.get('status', 'confirmed') != 'suspected']
+
     def summary(self) -> Dict:
-        return {'new': len(self.new), 'fixed': len(self.fixed),
+        return {'new': len(self.new), 'new_confirmed': len(self.new_confirmed),
+                'new_suspected': len(self.new_suspected), 'fixed': len(self.fixed),
                 'unchanged': len(self.unchanged), 'passed': self.passed,
                 'baseline_updated': self.baseline_updated}
 
@@ -125,15 +139,20 @@ class RegressionGate:
         self.baseline_path.write_text(json.dumps(payload, indent=2))
 
     def evaluate(self, findings: List[Dict], update: bool = False,
-                 meta: Optional[Dict] = None) -> GateResult:
+                 meta: Optional[Dict] = None, strict: bool = False) -> GateResult:
         """Compare, décide du verdict, et met à jour la baseline si demandé.
 
-        - update=False : la gate échoue s'il y a au moins un finding nouveau.
+        - update=False : la gate échoue s'il y a au moins un nouveau finding
+          CONFIRMÉ. Les nouveaux findings SUSPECTÉS (non prouvés) sont remontés
+          mais ne cassent pas le build — sauf `strict=True` (échoue sur tout
+          nouveau, confirmé ou suspecté).
         - update=True  : on accepte l'état courant comme nouvelle baseline
-          (verdict toujours vert) — pour entériner un run de référence.
+          (verdict toujours vert).
+
+        Le statut ne fait PAS partie de la signature : un même finding qui passe
+        de suspecté à confirmé reste la même signature (pas un « fixed + new »).
         """
         baseline = self.load_baseline()
-        # index signature -> finding (pour restituer les détails des nouveaux)
         by_sig: Dict[str, Dict] = {}
         for f in findings:
             by_sig.setdefault(finding_signature(f), f)
@@ -143,11 +162,16 @@ class RegressionGate:
         fixed = sorted(baseline - current)
         unchanged = sorted(current & baseline)
 
+        new = [{**by_sig[s], 'signature': s} for s in sorted(new_sigs)]
+        new_suspected = [n for n in new if n.get('status', 'confirmed') == 'suspected']
+        failing = new if strict else [n for n in new if n.get('status', 'confirmed') != 'suspected']
+
         result = GateResult(
-            new=[{**by_sig[s], 'signature': s} for s in sorted(new_sigs)],
+            new=new,
+            new_suspected=new_suspected,
             fixed=fixed,
             unchanged=unchanged,
-            passed=update or not new_sigs,
+            passed=update or not failing,
         )
 
         if update:

@@ -105,6 +105,22 @@ class ZAPHttpClient:
 
         return '\r\n'.join(request_lines)
 
+    @staticmethod
+    def _coerce_response(raw) -> str:
+        """Normalise le retour de `core.send_request` en réponse HTTP brute.
+
+        `zap.core.send_request` renvoie une LISTE de messages (dicts avec
+        `responseHeader`/`responseBody` séparés), pas une chaîne : le passer tel
+        quel au parseur donnait toujours status 0 (bug qui neutralisait TOUT le
+        chemin ZAP de diagnose). On reconstruit donc la réponse à partir du
+        DERNIER message (la réponse finale après redirections)."""
+        if isinstance(raw, list):
+            if not raw:
+                return ''
+            msg = raw[-1] if isinstance(raw[-1], dict) else {}
+            return (msg.get('responseHeader', '') or '') + (msg.get('responseBody', '') or '')
+        return raw or ''
+
     def _parse_zap_response(self, response_str: str, url: str,
                             method: str, elapsed: float) -> ZAPResponse:
         """Parse ZAP response string into ZAPResponse object"""
@@ -193,14 +209,15 @@ class ZAPHttpClient:
 
         try:
             # Send via ZAP API
-            response_str = self.zap.core.send_request(
+            raw = self.zap.core.send_request(
                 request_str,
                 followredirects=follow_redirects
             )
 
             elapsed = time.time() - start_time
 
-            return self._parse_zap_response(response_str, url, method, elapsed)
+            return self._parse_zap_response(
+                self._coerce_response(raw), url, method, elapsed)
 
         except Exception as e:
             elapsed = time.time() - start_time
