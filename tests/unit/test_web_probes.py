@@ -43,6 +43,13 @@ class TestPathTraversal:
         fs = probe_path_traversal(srv, [{'url': 'https://x/a?color=red', 'method': 'GET'}])
         assert fs == []
 
+    def test_finding_carries_winning_payload(self):
+        """La charge gagnante est structurée (flat['payload']) pour l'enrichissement ZAP."""
+        def srv(url, method, body=None):
+            return {'status': 200, 'body': 'root:x:0:0:root', 'content_type': 'text/plain'}
+        f = probe_path_traversal(srv, [{'url': 'https://x/media/raw?path=a', 'method': 'GET'}])[0]
+        assert f.payload and f.flat()['payload'] == f.payload
+
 
 class TestSSTI:
     def test_arithmetic_eval(self):

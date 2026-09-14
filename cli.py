@@ -1107,6 +1107,46 @@ def _run_investigations(har_data, config, args, zap_client):
     return out
 
 
+# Sources de findings « payload » -> type de wordlist ZAP. Seules les charges
+# PROUVÉES (status confirmed) sont réinjectées comme vocabulaire de fuzzer.
+_ZAP_PAYLOAD_SOURCES = {
+    'probe_api7': 'ssrf',
+    'web_lfi': 'path_traversal',
+    'web_ssti': 'ssti',
+    'web_xss': 'xss',
+    'web_open_redirect': 'open_redirect',
+}
+
+
+def _enrich_zap_payloads(all_findings, args, report):
+    """Réinjecte les charges confirmées (SSRF, path traversal, SSTI, XSS, open
+    redirect) dans le PatternStore -> export wordlists ZAP. Pendant « sondes
+    actives » de l'enrichissement adaptatif (IDOR/mass-assignment/hidden-params)."""
+    from urllib.parse import urlparse
+    from modules.llm.pattern_enricher import PatternEnricher
+
+    buckets = {}
+    for f in all_findings:
+        ptype = _ZAP_PAYLOAD_SOURCES.get(f.get('source', ''))
+        payload = f.get('payload', '')
+        if ptype and payload and f.get('status', 'confirmed') == 'confirmed':
+            buckets.setdefault(ptype, []).append(payload)
+    if not buckets:
+        return
+
+    domain = urlparse(args.target).netloc or 'unknown'
+    enricher = PatternEnricher.for_run(domain=domain, base_path='./patterns')
+    counts = {pt: enricher.record_payloads(pt, pls) for pt, pls in buckets.items()}
+    exported = enricher.flush()
+    total = sum(counts.values())
+    if total:
+        print(f"[ZAP-ENRICH] {total} proven payload(s) -> wordlists: "
+              + ', '.join(f'{k}={v}' for k, v in counts.items() if v))
+        if exported:
+            print(f"[ZAP-ENRICH] exported: {', '.join(sorted(exported))}")
+    report['zap_payload_enrichment'] = {'counts': counts, 'exported': list(exported)}
+
+
 def _run_web_probes(har_data, config, args, zap_client):
     """Sondes « angles morts » : path traversal, SSTI, XSS, open redirect, reset
     prédictible, CSV. L'exécuteur rejoue l'auth du HAR et expose l'en-tête
@@ -1577,6 +1617,10 @@ def run_diagnose(args):
         # Web blind-spots (path traversal, SSTI, XSS, open redirect, weak reset, CSV).
         if getattr(args, 'web', False):
             all_findings.extend(_run_web_probes(har_data, config, args, zap_client))
+
+        # Enrichissement ZAP : charges prouvées (SSRF/traversal/SSTI/XSS/redirect)
+        # -> wordlists de fuzzer, comme la campagne adaptative pour IDOR/mass-assign.
+        _enrich_zap_payloads(all_findings, args, report)
 
         # Third-party API consumption (API10) — static HAR analysis.
         if getattr(args, 'third_party', False):

@@ -94,6 +94,22 @@ class PatternEnricher:
                 })
         return self._add('hidden_params', patterns)
 
+    def record_payloads(self, pattern_type: str, payloads: List[str]) -> int:
+        """Réinjecte des charges PROUVÉES efficaces (SSRF, path traversal, SSTI,
+        XSS, open redirect) comme wordlist de fuzzer. Une ligne = une charge.
+
+        C'est le pendant « sondes actives » de record_idor/mass_assignment : ce que
+        les nouveaux moteurs confirment ne se perd pas, ZAP le rejoue."""
+        if not self.active:
+            return 0
+        seen, patterns = set(), []
+        for p in payloads:
+            p = str(p or '')
+            if p and p not in seen:
+                seen.add(p)
+                patterns.append({'payload': p})
+        return self._add(pattern_type, patterns)
+
     def flush(self) -> Dict[str, str]:
         """Persiste la session et pousse les wordlists vers l'export ZAP."""
         if not self.active:

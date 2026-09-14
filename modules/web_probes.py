@@ -42,12 +42,13 @@ class WebFinding:
     detail: str = ''
     source: str = 'deterministic'
     confidence: float = 0.9
+    payload: str = ''              # charge gagnante (pour l'enrichissement ZAP)
 
     def flat(self) -> Dict:
         v = self.verdict
         return {'source': f'web_{self.category.lower()}', 'risk': self.severity,
                 'name': self.title, 'url': self.url, 'owasp': self.owasp,
-                'status': v.status, 'adjudication': v.source}
+                'payload': self.payload, 'status': v.status, 'adjudication': v.source}
 
     @property
     def verdict(self):
@@ -185,7 +186,7 @@ def probe_path_traversal(execute_fn: Callable, targets: List[Dict]) -> List[WebF
                 if _LFI_MARKER.search(r.get('body', '') or ''):
                     findings.append(WebFinding('LFI', 'API8:2023', 'Critical',
                         f"Path traversal — arbitrary file read via {label}",
-                        probe_url, f"payload {payload} leaked /etc/passwd"))
+                        probe_url, f"payload {payload} leaked /etc/passwd", payload=payload))
                     break
             else:
                 continue
@@ -218,7 +219,7 @@ def _ssti_point(execute_fn, method, mutate, label) -> Optional[WebFinding]:
         if f"hz{marker}hz" in body or (marker in body and payload not in body):
             return WebFinding('SSTI', 'API8:2023', 'Critical',
                 f"SSTI — template expression evaluated via {label}",
-                probe_url, f"{payload} rendered as {marker}")
+                probe_url, f"{payload} rendered as {marker}", payload=payload)
     # 2) fuite de variable de contexte (python str.format)
     for payload in _SSTI_CTX_VARS:
         probe_url, probe_body = mutate(payload)
@@ -227,7 +228,7 @@ def _ssti_point(execute_fn, method, mutate, label) -> Optional[WebFinding]:
         if _SSTI_LEAK_MARKER.search(body) and payload not in body:
             return WebFinding('SSTI', 'API8:2023', 'Critical',
                 f"SSTI — context/config leaked via {label}",
-                probe_url, f"{payload} expanded to sensitive content")
+                probe_url, f"{payload} expanded to sensitive content", payload=payload)
     return None
 
 
@@ -261,7 +262,7 @@ def probe_reflected_xss(execute_fn: Callable, targets: List[Dict]) -> List[WebFi
                 if payload in body and _is_html(r):   # réfléchi SANS échappement, en contexte HTML
                     hit = WebFinding('XSS', 'API8:2023', 'High',
                         f"Reflected XSS — payload reflected unescaped via {label}",
-                        probe_url, f"{payload} returned verbatim in an HTML response")
+                        probe_url, f"{payload} returned verbatim in an HTML response", payload=payload)
                     break
             if hit:
                 findings.append(hit)
@@ -292,7 +293,8 @@ def probe_stored_xss(execute_fn: Callable, har_data: Dict,
                 if payload in (r.get('body', '') or '') and _is_html(r):
                     findings.append(WebFinding('XSS', 'API8:2023', 'High',
                         f"Stored XSS — payload persisted via {label}, rendered at {urlparse(ru).path}",
-                        ru, f"injected on {urlparse(probe_url).path}, reflected unescaped in HTML on read"))
+                        ru, f"injected on {urlparse(probe_url).path}, reflected unescaped in HTML on read",
+                        payload=f'{_XSS_MARK}<svg/onload=alert(1)>'))  # charge canonique (sans le nonce) pour la wordlist
                     return findings         # une preuve suffit (borne les relectures)
     return findings
 
@@ -329,12 +331,12 @@ def probe_open_redirect(execute_fn: Callable, targets: List[Dict]) -> List[WebFi
                 if 300 <= status < 400 and _EVIL_HOST in loc:
                     hit = WebFinding('OPEN_REDIRECT', 'API8:2023', 'Medium',
                         f"Open redirect — Location to attacker host via {label}",
-                        probe_url, f"{status} Location: {loc}")
+                        probe_url, f"{status} Location: {loc}", payload=payload)
                     break
                 if _EVIL_HOST in (r.get('body', '') or '') and 'refresh' in (r.get('body', '') or '').lower():
                     hit = WebFinding('OPEN_REDIRECT', 'API8:2023', 'Medium',
                         f"Open redirect — meta/JS redirect to attacker host via {label}",
-                        probe_url, "attacker host in refresh/location")
+                        probe_url, "attacker host in refresh/location", payload=payload)
                     break
             if hit:
                 findings.append(hit)

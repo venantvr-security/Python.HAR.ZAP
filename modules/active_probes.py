@@ -39,11 +39,12 @@ class ProbeFinding:
     detail: str = ''
     source: str = 'deterministic'   # 'deterministic' (marqueur) | 'llm' (adjugé)
     confidence: float = 0.9
+    payload: str = ''               # charge gagnante (pour l'enrichissement ZAP)
 
     def flat(self) -> Dict:
         v = self.verdict
         return {'source': f'probe_{self.category.lower()}', 'risk': self.severity,
-                'name': self.title, 'url': self.url,
+                'name': self.title, 'url': self.url, 'payload': self.payload,
                 'status': v.status, 'adjudication': v.source}
 
     @property
@@ -129,7 +130,7 @@ def _probe_point(execute_fn, method, mutate, label, adjudicator) -> Optional[Pro
         if any(m in body for m in _SSRF_MARKERS):
             return ProbeFinding('API7', 'Critical',
                 f"SSRF via {label} — internal resource reflected",
-                probe_url, f"payload {payload}")
+                probe_url, f"payload {payload}", payload=payload)
         if adjudicator is not None and getattr(adjudicator, 'available', False):
             v = adjudicator.classify_owasp(
                 {'alert': f'Possible SSRF via {label}={payload}', 'url': probe_url},
@@ -137,7 +138,8 @@ def _probe_point(execute_fn, method, mutate, label, adjudicator) -> Optional[Pro
             if v:
                 return ProbeFinding('API7', 'High',
                     f"SSRF suspected via {label} (LLM-adjudicated)",
-                    probe_url, v.get('reason', ''), source='llm', confidence=0.6)
+                    probe_url, v.get('reason', ''), source='llm', confidence=0.6,
+                    payload=payload)
     return None
 
 
