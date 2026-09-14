@@ -174,13 +174,10 @@ class AdaptiveMassAssignmentLoop:
                          "offline")
 
     def _interpret_llm(self, obs: MAObservation) -> Optional[MAVerdict]:
-        prompt = (
-            "A mass-assignment field was injected into an API write. Decide if the server "
-            "ACCEPTED it (privilege escalation) or rejected/ignored it. "
-            'Return JSON {"accepted": bool, "confidence": number(0-1), "reason": str}.\n'
-            f"Injected: {obs.field}={obs.value!r}\n"
-            f"Response: status={obs.status} body={obs.body[:600]!r}"
-        )
+        from .prompts import get_prompt
+        prompt = get_prompt('ma_interpret').render_user(
+            field=obs.field, value=repr(obs.value), status=obs.status,
+            body=repr(obs.body[:600]))
         data = self._ask_json(prompt)
         if isinstance(data, dict) and 'accepted' in data:
             return MAVerdict(bool(data['accepted']), float(data.get('confidence', 0.5)),
@@ -201,13 +198,9 @@ class AdaptiveMassAssignmentLoop:
         return out
 
     def _refine_llm(self, target: Dict, accepted: List[str], tried: set) -> List:
-        prompt = (
-            "These mass-assignment fields were ACCEPTED by the API. Propose adjacent "
-            "privilege-escalation fields likely to also be accepted. "
-            'Return JSON as an array of {"field": str, "value": any}.\n'
-            f"Context: {json.dumps(self.context)[:800]}\n"
-            f"Accepted so far: {json.dumps(accepted)}"
-        )
+        from .prompts import get_prompt
+        prompt = get_prompt('ma_refine').render_user(
+            context=json.dumps(self.context)[:800], accepted=json.dumps(accepted))
         data = self._ask_json(prompt)
         out: List = []
         if isinstance(data, list):
@@ -217,9 +210,9 @@ class AdaptiveMassAssignmentLoop:
         return out[:self.per_round]
 
     def _ask_json(self, prompt: str):
+        from .prompts.investigations import SYS_SECURITY_JSON
         try:
-            resp = self.client.complete(
-                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            resp = self.client.complete(prompt, system=SYS_SECURITY_JSON)
             return _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("adaptive_ma_llm_failed", error=str(e))

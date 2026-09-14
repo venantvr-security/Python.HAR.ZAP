@@ -99,19 +99,13 @@ def mix_adjudicate(verdict: "Verdict", context: Dict, client=None) -> "Verdict":
     if verdict.status != SUSPECTED or client is None:
         return verdict
     from .adaptive_idor import _extract_json
-    prompt = (
-        "A deterministic security check could not decide (SUSPECTED). Adjudicate: is "
-        "this a REAL finding or a FALSE POSITIVE? Judge only from the evidence; when "
-        "genuinely unclear, say uncertain.\n"
-        f"Finding type: {context.get('kind', '?')}\n"
-        f"URL: {context.get('url', '')}\n"
-        f"Why undecided: {context.get('reason', '')}\n"
-        f"Evidence: {str(context.get('evidence', ''))[:700]}\n"
-        'Return JSON {"decision": "real"|"false_positive"|"uncertain", '
-        '"reason": str, "confidence": number(0-1)}.')
+    from .prompts import get_prompt
+    system, user = get_prompt('mix_adjudicate').render(
+        kind=context.get('kind', '?'), url=context.get('url', ''),
+        reason=context.get('reason', ''),
+        evidence=str(context.get('evidence', ''))[:700])
     try:
-        resp = client.complete(
-            prompt, system="You are a senior security engineer. Answer only with JSON.")
+        resp = client.complete(user, system=system)
         data = _extract_json(getattr(resp, 'content', None))
     except Exception:
         return verdict
