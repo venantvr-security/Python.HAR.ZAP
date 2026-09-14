@@ -88,3 +88,44 @@ class TestGate:
     def test_missing_baseline_treats_all_as_new(self, tmp_path):
         r = RegressionGate(str(tmp_path / 'nope.json')).evaluate(self._findings())
         assert not r.passed and len(r.new) == 2
+
+
+class TestStatusAwareGate:
+    """La gate porte le statut : n'échoue que sur du nouveau CONFIRMÉ ; le
+    suspecté est remonté sans casser le build (sauf strict)."""
+
+    def _sig(self, status):
+        return [{'type': 'bola', 'endpoint': 'https://x/o/1', 'detail': 'd', 'status': status}]
+
+    def test_new_suspected_does_not_fail(self, tmp_path):
+        g = RegressionGate(str(tmp_path / 'b.json'))
+        g.evaluate([], update=True)                       # baseline vide
+        r = g.evaluate(self._sig('suspected'))
+        assert r.passed and r.summary()['new_suspected'] == 1 and r.summary()['new_confirmed'] == 0
+
+    def test_new_confirmed_fails(self, tmp_path):
+        g = RegressionGate(str(tmp_path / 'b.json'))
+        g.evaluate([], update=True)
+        r = g.evaluate(self._sig('confirmed'))
+        assert not r.passed and r.summary()['new_confirmed'] == 1
+
+    def test_strict_fails_on_suspected(self, tmp_path):
+        g = RegressionGate(str(tmp_path / 'b.json'))
+        g.evaluate([], update=True)
+        r = g.evaluate(self._sig('suspected'), strict=True)
+        assert not r.passed
+
+    def test_status_not_in_signature(self, tmp_path):
+        # suspecté -> confirmé : même signature (pas un fixed + new).
+        g = RegressionGate(str(tmp_path / 'b.json'))
+        g.evaluate(self._sig('suspected'), update=True)
+        r = g.evaluate(self._sig('confirmed'))
+        assert r.new == [] and len(r.unchanged) == 1
+
+    def test_normalize_carries_status(self):
+        from modules.regression_gate import normalize_diag_findings
+        out = normalize_diag_findings([
+            {'source': 'shadow_endpoint', 'url': '/x', 'name': 'n', 'risk': 'Medium',
+             'status': 'confirmed'},
+            {'source': 'bola', 'url': '/y', 'name': 'm', 'risk': 'High', 'status': 'suspected'}])
+        assert {o['status'] for o in out} == {'confirmed', 'suspected'}

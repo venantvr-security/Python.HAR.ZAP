@@ -115,3 +115,40 @@ class TestZAPResponse:
         )
 
         assert response.request_id == 12345
+
+
+class TestSendRequestListReturn:
+    """Régression : `zap.core.send_request` renvoie une LISTE de messages (dicts),
+    pas une chaîne. Le parseur doit la normaliser (sinon status 0 partout)."""
+
+    def _client(self, mock_zap):
+        from modules.zap_http_client import ZAPHttpClient
+        return ZAPHttpClient(zap=mock_zap)
+
+    def test_coerce_list_message(self, mock_zap):
+        c = self._client(mock_zap)
+        raw = [{'responseHeader': 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n',
+                'responseBody': '{"ok":true}'}]
+        s = c._coerce_response(raw)
+        assert s.startswith('HTTP/1.1 200 OK') and '{"ok":true}' in s
+
+    def test_coerce_empty_and_string(self, mock_zap):
+        c = self._client(mock_zap)
+        assert c._coerce_response([]) == ''
+        assert c._coerce_response('HTTP/1.1 204 No Content\r\n\r\n').startswith('HTTP/1.1 204')
+
+    def test_request_parses_list_return(self, mock_zap):
+        mock_zap.core.send_request = Mock(return_value=[
+            {'responseHeader': 'HTTP/1.1 401 UNAUTHORIZED\r\nContent-Type: application/json\r\n\r\n',
+             'responseBody': '{"detail":"no token"}'}])
+        c = self._client(mock_zap)
+        r = c.request('GET', 'http://t/books/v1/1', headers={}, follow_redirects=False)
+        assert r.status_code == 401 and 'no token' in r.text
+
+    def test_request_uses_last_after_redirects(self, mock_zap):
+        mock_zap.core.send_request = Mock(return_value=[
+            {'responseHeader': 'HTTP/1.1 302 Found\r\nLocation: /next\r\n\r\n', 'responseBody': ''},
+            {'responseHeader': 'HTTP/1.1 200 OK\r\n\r\n', 'responseBody': 'final'}])
+        c = self._client(mock_zap)
+        r = c.request('GET', 'http://t/x', follow_redirects=True)
+        assert r.status_code == 200 and r.text == 'final'

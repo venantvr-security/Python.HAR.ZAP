@@ -193,6 +193,9 @@ Examples:
     diag_parser.add_argument('--baseline',
                              help='Security-regression gate: JSON baseline of known findings; '
                                   'exit 1 on any NEW finding vs this baseline')
+    diag_parser.add_argument('--fail-on-suspected', action='store_true',
+                             help='Regression gate: also fail on NEW suspected (unproven) findings, '
+                                  'not only confirmed ones')
     diag_parser.add_argument('--update-baseline', action='store_true',
                              help='Write current findings as the new --baseline (accepts current state)')
     diag_parser.add_argument('--probes', action='store_true',
@@ -1145,21 +1148,29 @@ def _run_regression_gate(all_findings, adaptive_result, args, report):
     findings = normalize_diag_findings(all_findings) + normalize_adaptive(adaptive_result)
     gate = RegressionGate(args.baseline)
     result = gate.evaluate(findings, update=getattr(args, 'update_baseline', False),
-                           meta={'target': args.target})
+                           meta={'target': args.target},
+                           strict=getattr(args, 'fail_on_suspected', False))
 
     s = result.summary()
     if result.baseline_updated:
         print(f"\n[GATE] Baseline updated: {args.baseline} "
               f"({len(result.unchanged) + len(result.new)} signatures)")
     else:
-        print(f"\n[GATE] vs {args.baseline} — new: {s['new']} | fixed: {s['fixed']} | "
+        # On distingue le nouveau CONFIRMÉ (qui casse le build) du SUSPECTÉ
+        # (remonté pour info seulement, sauf --fail-on-suspected).
+        print(f"\n[GATE] vs {args.baseline} — new confirmed: {s['new_confirmed']} | "
+              f"new suspected: {s['new_suspected']} | fixed: {s['fixed']} | "
               f"unchanged: {s['unchanged']} -> {'PASS' if result.passed else 'FAIL'}")
-        for n in result.new:
-            print(f"  NEW  {n.get('severity', ''):<8} {n['signature']}")
+        for n in result.new_confirmed:
+            print(f"  NEW  CONFIRMED {n.get('severity', ''):<8} {n['signature']}")
+        for n in result.new_suspected:
+            print(f"  NEW  suspected {n.get('severity', ''):<8} {n['signature']}")
         for sig in result.fixed:
-            print(f"  FIXED         {sig}")
+            print(f"  FIXED          {sig}")
 
-    report['regression_gate'] = {**s, 'new_signatures': [n['signature'] for n in result.new],
+    report['regression_gate'] = {**s,
+                                 'new_signatures': [n['signature'] for n in result.new_confirmed],
+                                 'new_suspected_signatures': [n['signature'] for n in result.new_suspected],
                                  'fixed_signatures': result.fixed}
     return result
 
