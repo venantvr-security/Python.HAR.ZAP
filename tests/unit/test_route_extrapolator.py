@@ -90,3 +90,25 @@ class TestProbe:
         ]
         confirmed = probe_candidates(send, "https://api.x", cands)
         assert {c.path for c in confirmed} == {"/books/v1/realsecret"}
+
+
+class TestExistingIdNotShadow:
+    """Régression : un mot deviné qui est un id existant sur /{id} (même schéma
+    d'item) n'est pas une route cachée."""
+
+    def test_existing_id_dropped_with_item_schema(self):
+        users = {"admin": {"username": "admin", "email": "a@x"}}
+
+        def send(method, url, headers=None):
+            seg = url.rstrip('/').split('/')[-1]
+            if seg == "_debug":
+                return {"status": 200, "body": json.dumps({"users": []})}
+            if seg in users:
+                return {"status": 200, "body": json.dumps(users[seg])}
+            return {"status": 404, "body": "{}"}
+
+        cands = [CandidateRoute("GET", "/users/v1/admin"),
+                 CandidateRoute("GET", "/users/v1/_debug")]
+        conf = probe_candidates(send, "https://api", cands,
+                                item_keys=frozenset({"username", "email"}))
+        assert {c.path for c in conf} == {"/users/v1/_debug"}

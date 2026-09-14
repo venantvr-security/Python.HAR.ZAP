@@ -68,3 +68,31 @@ class TestModelIntegration:
         model = APIModel.from_har(har)
         urls = AuthConfirmer(lambda *a, **k: {}, api_model=model).protected_urls()
         assert URL in urls and "https://api.x/books/v1" not in urls
+
+
+class TestExpiredTokenNotMasking:
+    """Régression : un jeton capturé EXPIRÉ ne doit pas masquer un vrai bypass
+    alg=none (les claims temporels du jeton forgé sont rafraîchis)."""
+
+    def test_alg_none_confirmed_despite_expired_capture(self):
+        import time as _t
+        expired = _token()  # exp=9999999999 lointain ; on force l'expiration :
+        parts = expired.split('.')
+        p = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+        p['exp'] = int(_t.time()) - 10
+        parts[1] = base64.urlsafe_b64encode(json.dumps(p).encode()).rstrip(b'=').decode()
+        expired = '.'.join(parts)
+
+        def server(method, url, headers=None):
+            auth = (headers or {}).get("Authorization", "")
+            if not auth:
+                return {"status": 401}
+            tok = auth.split(" ", 1)[-1]
+            hdr = json.loads(base64.urlsafe_b64decode(tok.split('.')[0] + '=='))
+            pl = json.loads(base64.urlsafe_b64decode(tok.split('.')[1] + '=='))
+            if pl.get("exp", 0) < _t.time():
+                return {"status": 401}          # vérifie l'expiration
+            return {"status": 200} if hdr.get("alg") == "none" else {"status": 401}
+
+        f = AuthConfirmer(server).confirm("https://api/x", expired)
+        assert any(x.technique == "alg=none" and x.verdict.status == CONFIRMED for x in f)

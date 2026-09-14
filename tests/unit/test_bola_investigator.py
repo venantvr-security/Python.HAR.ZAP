@@ -109,3 +109,23 @@ class TestLLMAdjudication:
                        Session("name2", {"Authorization": "N2"}, "name2")],
                       ownership_field=None)
         assert any(x.confirmed and x.source == "llm" for x in f)
+
+
+class TestProtectedGate:
+    """Régression : sans preuve de contrôle d'accès (aucun refus), un objet
+    lisible par tous et portant un champ owner n'est PAS un BOLA confirmé."""
+
+    def test_public_authored_resource_is_suspected_not_confirmed(self):
+        body = json.dumps({"id": 7, "author": "alice", "public": True})
+        srv = lambda m, u, headers=None: {"status": 200, "body": body}  # noqa: E731
+        inv = BolaInvestigator(srv)
+        f = inv.probe(["https://blog/posts/7"],
+                      [Session("anon", {}, None), Session("bob", {"Authorization": "B"}, "bob")],
+                      ownership_field="author")
+        assert f and all(x.verdict.status == "suspected" for x in f)
+
+    def test_protected_object_still_confirmed(self):
+        # anon refusé (401) => contrôle d'accès présent => cross-read = confirmé.
+        f = BolaInvestigator(OwnedServer(OBJECTS).send).probe(
+            list(OBJECTS), SESSIONS, ownership_field="owner")
+        assert any(x.verdict.status == "confirmed" for x in f)

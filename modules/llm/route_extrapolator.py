@@ -18,6 +18,7 @@ Discipline du projet :
 - Aucune méthode destructive n'est sondée automatiquement (POST/PUT/PATCH/DELETE
   restent des candidats non sondés, à valider par un humain).
 """
+import json
 import re
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
@@ -153,17 +154,31 @@ def _concretize(path: str) -> str:
     return '/'.join('1' if _PARAM_RE.match(s) else s for s in path.split('/'))
 
 
-def probe_candidates(send: SendFn, base_url: str, candidates: List[CandidateRoute],
-                     headers: Optional[Dict] = None) -> List[CandidateRoute]:
-    """Sonde les candidats par des requêtes SÛRES et retient ceux qui existent
-    VRAIMENT, en neutralisant le piège du catch-all `/{id}`.
+def _top_keys(body: str):
+    """Ensemble des clés de premier niveau d'un corps JSON objet, ou None."""
+    try:
+        data = json.loads(body or 'null')
+    except (ValueError, TypeError):
+        return None
+    return frozenset(data.keys()) if isinstance(data, dict) else None
 
-    Piège : sur une ressource ayant une route `/{id}`, un chemin deviné comme
-    `/books/v1/_debug` frappe cette route (« _debug » = un id inexistant) et
-    renvoie le même code que n'importe quel id (souvent 401/404). Le retenir
-    serait un faux positif. Parade : une SONDE DE CONTRÔLE avec un segment
-    aléatoire donne le comportement du catch-all ; on ne garde un candidat que si
-    son statut DIFFÈRE de ce contrôle (et n'est pas 404/405/501/0).
+
+def probe_candidates(send: SendFn, base_url: str, candidates: List[CandidateRoute],
+                     headers: Optional[Dict] = None,
+                     item_keys: Optional[frozenset] = None) -> List[CandidateRoute]:
+    """Sonde les candidats par des requêtes SÛRES et retient ceux qui existent
+    VRAIMENT, en neutralisant DEUX pièges du catch-all `/{id}`.
+
+    Piège 1 (statut) : `/books/v1/_debug` frappe la route `/{id}` (« _debug » = un
+    id inexistant) et renvoie le même code que n'importe quel id (souvent 401/404).
+    Parade : une SONDE DE CONTRÔLE (segment aléatoire) donne le comportement du
+    catch-all ; on ne garde un candidat que si son statut DIFFÈRE (et ≠ 404/405/501/0).
+
+    Piège 2 (id existant) : un mot deviné qui EST un id réel (`/users/v1/admin` où
+    `admin` est un username) renvoie 200 alors que le contrôle aléatoire renvoie
+    404 → faux positif. Parade : si `item_keys` (les clés du schéma d'item, du
+    modèle sémantique) est fourni, un candidat 2xx dont le corps a EXACTEMENT ce
+    schéma est un simple item, pas une route distincte → écarté.
 
     Les méthodes non sûres ne sont jamais émises (on ne mute pas en devinant) →
     elles restent non sondées (`exists=None`).
@@ -172,27 +187,30 @@ def probe_candidates(send: SendFn, base_url: str, candidates: List[CandidateRout
     parsed = urlparse(base_url)
     control_cache: Dict[tuple, int] = {}
 
-    def _probe(method: str, path: str) -> int:
+    def _probe(method: str, path: str):
         url = urlunparse((parsed.scheme, parsed.netloc, _concretize(path), '', '', ''))
-        return int((send(method, url, headers=headers) or {}).get('status', 0) or 0)
+        r = send(method, url, headers=headers) or {}
+        return int(r.get('status', 0) or 0), (r.get('body', '') or '')
 
     def _control_status(method: str, path: str) -> int:
-        # Base = chemin sans le dernier segment ; on sonde un segment improbable.
         parts = path.rstrip('/').split('/')
         base = '/'.join(parts[:-1]) or '/'
         key = (method, base)
         if key not in control_cache:
-            control_cache[key] = _probe(method, f"{base}/zz{uuid.uuid4().hex[:8]}")
+            control_cache[key] = _probe(method, f"{base}/zz{uuid.uuid4().hex[:8]}")[0]
         return control_cache[key]
 
     confirmed: List[CandidateRoute] = []
     for c in candidates:
         if c.method.upper() not in _SAFE_METHODS:
             continue
-        c.status = _probe(c.method, c.path)
+        c.status, body = _probe(c.method, c.path)
         control = _control_status(c.method, c.path)
-        # Existe = code exploitable ET distinct du catch-all deviné.
-        c.exists = c.status not in (0, 404, 405, 501) and c.status != control
+        distinct = c.status not in (0, 404, 405, 501) and c.status != control
+        # Un 2xx au schéma d'item = id existant sur la route /{id}, pas une route.
+        looks_like_item = (item_keys is not None and 200 <= c.status < 300
+                           and _top_keys(body) == item_keys)
+        c.exists = distinct and not looks_like_item
         if c.exists:
             confirmed.append(c)
             logger.info("shadow_route_confirmed", method=c.method, path=c.path,

@@ -109,6 +109,13 @@ class BolaInvestigator:
                                  'body': r.get('body', '') or '', 'session': s}
 
             owner = self._owner_of(reads, ownership_field)
+            # Porte « est-ce réellement protégé ? » : un BOLA n'est prouvé que si
+            # l'objet applique un contrôle d'accès — au moins un principal a été
+            # REFUSÉ (401/403). Si TOUT LE MONDE obtient l'objet, ce n'est pas une
+            # percée mais une ressource publique (ex. billet de blog avec champ
+            # `author`) → on rétrograde en « suspected » au lieu d'affirmer.
+            # (Même logique que la matrice d'accès ; elle manquait ici.)
+            protected = any(r['status'] in (401, 403) for r in reads.values())
             for s in sessions:
                 info = reads[s.name]
                 st = info['status']
@@ -116,13 +123,17 @@ class BolaInvestigator:
                     continue
                 verdict, reason, source = self._adjudicate(s, owner, info, reads,
                                                            ownership_field)
-                if verdict:
-                    findings.append(BolaFinding(
-                        object_url=url, attacker=s.name, owner=owner, status=st,
-                        confirmed=True, reason=reason, source=source,
-                        severity='Critical' if s.identity in (None, '') else 'High'))
-                    logger.info("bola_confirmed", url=url, attacker=s.name,
-                                owner=owner, source=source)
+                if not verdict:
+                    continue
+                if not protected and source == "deterministic":
+                    source = "suspected"
+                    reason += " — but no access-control evidence (object readable by all; may be public)"
+                findings.append(BolaFinding(
+                    object_url=url, attacker=s.name, owner=owner, status=st,
+                    confirmed=True, reason=reason, source=source,
+                    severity='Critical' if s.identity in (None, '') else 'High'))
+                logger.info("bola_finding", url=url, attacker=s.name,
+                            owner=owner, source=source, protected=protected)
         return findings
 
     def _owner_of(self, reads: Dict, ownership_field: Optional[str]) -> Optional[str]:
