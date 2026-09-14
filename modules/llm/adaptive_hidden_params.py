@@ -164,15 +164,11 @@ class AdaptiveHiddenParamsLoop:
         return HPVerdict(False, 0.7, "No behavioral change", "offline")
 
     def _interpret_llm(self, obs: HPObservation, baseline: HPObservation) -> Optional[HPVerdict]:
-        prompt = (
-            "A hidden parameter was added to a request. Decide if it changed server "
-            "behavior in a security-relevant way (debug output, admin mode, extra data). "
-            'Return JSON {"active": bool, "confidence": number(0-1), "reason": str}.\n'
-            f"BASELINE: status={baseline.status} len={baseline.content_length} "
-            f"body={baseline.body[:400]!r}\n"
-            f"WITH {obs.param}={obs.value}: status={obs.status} len={obs.content_length} "
-            f"body={obs.body[:400]!r}"
-        )
+        from .prompts import get_prompt
+        prompt = get_prompt('hidden_params_interpret').render_user(
+            baseline_status=baseline.status, baseline_len=baseline.content_length,
+            baseline_body=repr(baseline.body[:400]), param=obs.param, value=obs.value,
+            obs_status=obs.status, obs_len=obs.content_length, obs_body=repr(obs.body[:400]))
         data = self._ask_json(prompt)
         if isinstance(data, dict) and 'active' in data:
             return HPVerdict(bool(data['active']), float(data.get('confidence', 0.5)),
@@ -193,12 +189,9 @@ class AdaptiveHiddenParamsLoop:
         return out
 
     def _refine_llm(self, target: Dict, active: List[str], tried: set) -> List:
-        prompt = (
-            "These hidden parameters changed server behavior. Propose adjacent debug/admin "
-            'parameters likely to also be active. Return JSON as an array of '
-            '{"name": str, "value": str}.\n'
-            f"Endpoint: {target.get('url')}\nActive so far: {json.dumps(active)}"
-        )
+        from .prompts import get_prompt
+        prompt = get_prompt('hidden_params_refine').render_user(
+            url=target.get('url'), active=json.dumps(active))
         data = self._ask_json(prompt)
         out: List = []
         if isinstance(data, list):
@@ -208,9 +201,9 @@ class AdaptiveHiddenParamsLoop:
         return out[:self.per_round]
 
     def _ask_json(self, prompt: str):
+        from .prompts.historical import SYS_SEC_REQUESTED
         try:
-            resp = self.client.complete(
-                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            resp = self.client.complete(prompt, system=SYS_SEC_REQUESTED)
             return _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("adaptive_hp_llm_failed", error=str(e))

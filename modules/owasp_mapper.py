@@ -3,7 +3,6 @@ OWASP Top 10 Mapper - Map ZAP alerts to OWASP categories with compliance scoring
 """
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
-from collections import defaultdict
 
 from .utils import get_logger
 
@@ -694,15 +693,11 @@ class OWASPLLMClassifier:
         import json as _json
         keep = ('alert', 'name', 'risk', 'severity', 'native_type', 'url', 'cweid')
         slim = {k: alert[k] for k in keep if k in alert}
-        prompt = (
-            "Map this security finding to exactly one category id from the list, "
-            'or null if none fits. Return JSON {"category": str|null, "reason": str}.\n'
-            f"Categories: {_json.dumps(categories)}\n"
-            f"Finding: {_json.dumps(slim)}"
-        )
+        from .llm.prompts import get_prompt
+        system, user = get_prompt('owasp_classify').render(
+            categories=_json.dumps(categories), finding=_json.dumps(slim))
         try:
-            resp = self._client.complete(
-                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            resp = self._client.complete(user, system=system)
             data = _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("owasp_llm_classify_failed", error=str(e))

@@ -92,16 +92,11 @@ class FalsePositiveAdjudicator:
             'description': _attr(issue, 'description'),
             'evidence': _attr(issue, 'evidence', {}),
         }
-        prompt = (
-            "Decide if this passive security finding is a TRUE positive or a false "
-            "positive (e.g. a regex matching sample/placeholder data, or a header flagged "
-            "on a response where it does not apply). "
-            'Return JSON {"is_true_positive": bool, "confidence": number(0-1), "reason": str}.\n'
-            f"Finding: {json.dumps(payload, default=str)[:1500]}"
-        )
+        from .prompts import get_prompt
+        system, user = get_prompt('fp_adjudicate').render(
+            finding=json.dumps(payload, default=str)[:1500])
         try:
-            resp = self.client.complete(
-                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            resp = self.client.complete(user, system=system)
             data = _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("fp_adjudicate_llm_failed", error=str(e))

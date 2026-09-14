@@ -13,6 +13,7 @@ from .attacks import (
 )
 from .passive import PASSIVE_REGEX
 from .investigations import INVESTIGATION_PROMPTS
+from .historical import HISTORICAL_PROMPTS
 
 # Registry of all prompts
 PROMPTS = {
@@ -25,6 +26,7 @@ PROMPTS = {
     'business_logic': BUSINESS_LOGIC,
     'hidden_params': HIDDEN_PARAMS,
     **INVESTIGATION_PROMPTS,
+    **HISTORICAL_PROMPTS,
 }
 
 
