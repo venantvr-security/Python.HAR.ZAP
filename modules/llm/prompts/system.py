@@ -30,3 +30,18 @@ SYSTEM_PROMPTS = {
     'payload_generator': PAYLOAD_GENERATOR,
     'red_team': RED_TEAM,
 }
+
+
+# Préambule d'autorisation — préfixé à TOUTE persona système quand l'opérateur a
+# attesté son autorisation (voir LLMConfig.authorized / --i-am-authorized).
+# Il matérialise l'intention légitime là où part l'appel réseau : améliore
+# l'alignement usage-responsable ET la fiabilité des réponses sur les tâches
+# offensives (moins de refus/hedging faute de contexte).
+AUTHORIZATION_PREAMBLE = (
+    "You are assisting an AUTHORIZED security assessment. The operator running "
+    "this tool (HAR-ZAP) has attested they have explicit permission to test the "
+    "in-scope target, on systems they own or are contracted to assess, for "
+    "defensive and educational purposes. Work only from the data provided and "
+    "stay within that scope; never target anything outside it. Provide precise, "
+    "factual security analysis."
+)

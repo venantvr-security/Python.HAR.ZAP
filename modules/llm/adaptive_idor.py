@@ -305,7 +305,12 @@ def client_from_config(config: Optional[Dict]):
     l'environnement (voir modules.llm.replay), pour rejouer une séquence sans IA.
     """
     from .replay import wrap_for_replay
+    from .client import ai_authorized
     import os
+    # Le replay sert un transcript déjà autorisé, sans réseau : toujours permis.
+    if os.environ.get('HARZAP_LLM_REPLAY_MODE', '').lower() == 'replay':
+        return wrap_for_replay(None, config)
+
     inner = None
     try:
         from .client import LLMClient
@@ -313,7 +318,13 @@ def client_from_config(config: Optional[Dict]):
     except Exception as e:
         logger.info("adaptive_idor_client_unavailable", reason=str(e))
         inner = None
-    # En mode replay, aucune clé n'est requise (servi depuis le transcript).
-    if os.environ.get('HARZAP_LLM_REPLAY_MODE', '').lower() == 'replay':
-        return wrap_for_replay(inner, config)
-    return wrap_for_replay(inner, config) if inner is not None else None
+    if inner is None:
+        return None
+    # Garde-fou d'usage responsable : sans attestation d'autorisation, aucun appel
+    # IA ne part (les prompts génératifs offensifs restent hors-ligne).
+    if not ai_authorized(config):
+        logger.info("ai_disabled_no_authorization")
+        print("[AI] Authorization not attested — AI disabled (offline heuristics). "
+              "Pass --i-am-authorized (or set HARZAP_AI_AUTHORIZED=1) to enable.")
+        return None
+    return wrap_for_replay(inner, config)

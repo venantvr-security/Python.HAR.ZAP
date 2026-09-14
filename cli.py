@@ -17,6 +17,7 @@ scan, génère les rapports, et s'arrête. Les fichiers de session
 sont toutefois partagés sur le disque — c'est volontaire pour que les FP
 marqués en Streamlit soient respectés par la CLI en CI.
 """
+import os
 import argparse
 import json
 import sys
@@ -149,6 +150,8 @@ Examples:
                                  '(e.g. --role user=user.har --role admin=admin.har)')
     mtx_parser.add_argument('--ai', action='store_true',
                             help='Use the embedded LLM to adjudicate ambiguous (SUSPECTED) findings')
+    mtx_parser.add_argument('--i-am-authorized', action='store_true',
+                            help='Attest authorization to test the target (required to enable --ai)')
     mtx_parser.add_argument('--bola', action='store_true',
                             help='Also run multi-session BOLA (object-level) on observed objects')
     mtx_parser.add_argument('--anon', action='store_true',
@@ -187,6 +190,9 @@ Examples:
                              help='Emit OWASP API Top 10 2023 compliance report')
     diag_parser.add_argument('--ai', action='store_true',
                              help='Use the LLM (modules.llm) to classify OWASP-unmapped findings')
+    diag_parser.add_argument('--i-am-authorized', action='store_true',
+                             help='Attest you have explicit authorization to test the target. '
+                                  'Required to enable AI calls (--ai); without it, AI stays offline.')
     diag_parser.add_argument('--adaptive', action='store_true',
                              help='Run adaptive closed-loop attacks (IDOR/mass-assignment/hidden-params) '
                                   'and enrich payload patterns (PatternStore + ZAP export)')
@@ -636,6 +642,8 @@ def _run_matrix_bola(role_hars, roles, execute, client=None):
 
 
 def run_matrix_cmd(args):
+    if getattr(args, 'i_am_authorized', False):
+        os.environ['HARZAP_AI_AUTHORIZED'] = '1'
     """Construit la matrice d'accès multi-rôles et cartographie BOLA/BFLA."""
     from modules.access_matrix import (Role, build_endpoints, run_matrix, render_matrix_cli)
     from modules.idor_detector import IDORDetector
@@ -1275,6 +1283,8 @@ def _diag_findings_to_alerts(all_findings):
 
 
 def run_diagnose(args):
+    if getattr(args, 'i_am_authorized', False):
+        os.environ['HARZAP_AI_AUTHORIZED'] = '1'
     """Run full diagnostic attack suite.
 
     Orchestre en une seule commande : ZAP scan + red-team Python + modules
@@ -1446,7 +1456,8 @@ def run_diagnose(args):
                 'low': low_count
             },
             'breakdown': adv_results,
-            'findings': all_findings
+            'findings': all_findings,
+            'ai_authorized': getattr(args, 'i_am_authorized', False),
         }
         if fp_stats is not None:
             report['passive_fp_adjudication'] = fp_stats
