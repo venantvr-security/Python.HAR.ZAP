@@ -33,7 +33,11 @@ Deux familles cohabitent volontairement.
 | JWT alg=none | API2 | tout endpoint authentifié |
 | Exposition/shadow | API9 | `/debug/config`, `/actuator/env` |
 
-### Angles morts DAST (non gérés a priori — banc d'essai)
+### Classes web (désormais couvertes par `diagnose --web`)
+
+Historiquement des angles morts DAST ; un moteur dédié (`modules/web_probes.py`)
+les prouve maintenant par marqueur (path traversal, SSTI, XSS réfléchi/stocké,
+open redirect, reset prédictible, injection CSV).
 
 | Faille | Endpoint | Preuve |
 |--------|----------|--------|
@@ -68,8 +72,8 @@ Deux familles cohabitent volontairement.
 
 Confirmateur d'auth (alg=none **confirmé** par forge+rejeu), extrapolation de
 routes (`/debug/config`, `/actuator/env`, `/internal/metadata`), BOLA
-multi-sessions, matrice d'accès (BFLA), sondes SSRF, business-flow. Les angles
-morts (path traversal, SSTI, XSS, open redirect, reset prédictible, CORS, CSV)
-donnent une base pour mesurer la couverture et développer de nouveaux moteurs.
-`/internal/metadata` renvoie 403 en direct (accessible uniquement par SSRF) :
-bon test de faux positif.
+multi-sessions, matrice d'accès (BFLA), sondes SSRF (query **et** corps JSON),
+business-flow (transition `publish` confirmée par readback), et les sondes web
+(`--web` : path traversal, SSTI, XSS réfléchi/stocké, open redirect, reset
+prédictible, CSV). `/internal/metadata` renvoie 403 en direct (accessible
+uniquement par SSRF) : bon test de faux positif.

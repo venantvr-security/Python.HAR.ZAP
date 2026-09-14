@@ -216,6 +216,8 @@ Examples:
                              help='Second-order investigations: extrapolate shadow routes (API9) and forge/replay JWT bypass (API2), verdicts proven not asserted')
     diag_parser.add_argument('--third-party', action='store_true',
                              help='Analyze third-party API consumption (API10): cleartext, redirects, deps')
+    diag_parser.add_argument('--web', action='store_true',
+                             help='Active web blind-spot probes: path traversal/LFI, SSTI, reflected/stored XSS, open redirect, predictable reset token, CSV injection')
     diag_parser.add_argument('--ai-record', metavar='FILE',
                              help='Record all LLM responses to a transcript (implies --ai)')
     diag_parser.add_argument('--ai-replay', metavar='FILE',
@@ -1105,6 +1107,39 @@ def _run_investigations(har_data, config, args, zap_client):
     return out
 
 
+def _run_web_probes(har_data, config, args, zap_client):
+    """Sondes « angles morts » : path traversal, SSTI, XSS, open redirect, reset
+    prédictible, CSV. L'exécuteur rejoue l'auth du HAR et expose l'en-tête
+    Location (nécessaire à l'open redirect), redirections NON suivies."""
+    from modules.web_probes import run_web_probes
+    from modules.idor_detector import IDORDetector
+    auth = IDORDetector.extract_auth_tokens(har_data) or {}
+
+    def execute(url, method='GET', body=None):
+        if zap_client is not None:
+            r = zap_client.request(method, url, headers=auth, json_data=body,
+                                   follow_redirects=False)
+            hdrs = r.headers or {}
+            loc = hdrs.get('Location', '') or hdrs.get('location', '')
+            ct = hdrs.get('Content-Type', '') or hdrs.get('content-type', '')
+            return {'status': r.status_code, 'body': (r.text or '')[:4000],
+                    'location': loc, 'content_type': ct}
+        import requests
+        try:
+            r = requests.request(method, url, headers=auth, json=body, timeout=10,
+                                 verify=False, allow_redirects=False)
+            return {'status': r.status_code, 'body': r.text[:4000],
+                    'location': r.headers.get('Location', ''),
+                    'content_type': r.headers.get('Content-Type', '')}
+        except Exception:
+            return {'status': 0, 'body': '', 'location': '', 'content_type': ''}
+
+    out = run_web_probes(execute, har_data)
+    print(f"[WEB] {len(out)} blind-spot finding(s) "
+          "(traversal/ssti/xss/open-redirect/weak-reset/csv)")
+    return out
+
+
 def _run_shadow_endpoints(har_data, args, config):
     """Diff HAR ↔ OpenAPI → endpoints fantômes (API9)."""
     from modules.openapi_importer import OpenAPIImporter
@@ -1538,6 +1573,10 @@ def run_diagnose(args):
         # Second-order investigations (shadow routes API9 + auth forge API2).
         if getattr(args, 'investigate', False):
             all_findings.extend(_run_investigations(har_data, config, args, zap_client))
+
+        # Web blind-spots (path traversal, SSTI, XSS, open redirect, weak reset, CSV).
+        if getattr(args, 'web', False):
+            all_findings.extend(_run_web_probes(har_data, config, args, zap_client))
 
         # Third-party API consumption (API10) — static HAR analysis.
         if getattr(args, 'third_party', False):
