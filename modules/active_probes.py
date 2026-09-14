@@ -41,8 +41,10 @@ class ProbeFinding:
     confidence: float = 0.9
 
     def flat(self) -> Dict:
+        v = self.verdict
         return {'source': f'probe_{self.category.lower()}', 'risk': self.severity,
-                'name': self.title, 'url': self.url}
+                'name': self.title, 'url': self.url,
+                'status': v.status, 'adjudication': v.source}
 
     @property
     def verdict(self):

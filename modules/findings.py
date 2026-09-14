@@ -11,7 +11,7 @@ valeur (IDOR/API1, mass-assignment/API3, hidden-params/API5).
 """
 import json
 import html as _html
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -74,11 +74,17 @@ class Finding:
     proof: str = ''
     method: str = 'GET'
     confidence: Optional[float] = None
+    # Vocabulaire d'investigation commun (modules.llm.investigation) : 'confirmed'
+    # = prouvé, 'suspected' = signal non confirmé (à ne pas présenter comme
+    # certain). Défaut 'confirmed' pour la rétrocompatibilité des findings hérités.
+    status: str = 'confirmed'
+    adjudication: str = 'deterministic'   # 'deterministic' | 'llm'
 
     def to_dict(self) -> Dict:
         return {k: getattr(self, k) for k in
                 ('severity', 'title', 'vector', 'endpoint', 'owasp',
-                 'impact', 'fix', 'proof', 'method', 'confidence')}
+                 'impact', 'fix', 'proof', 'method', 'confidence',
+                 'status', 'adjudication')}
 
 
 def curl_for(method: str, url: str, body: Optional[Dict] = None, auth: bool = True) -> str:
@@ -128,6 +134,15 @@ def build_findings(all_findings: List[Dict], adaptive_result=None, target: str =
                 out.append(Finding('High', f"Mass assignment — '{e.get('field')}' accepted",
                                    'mass_assignment', f.target_url, owasp, impact, fix,
                                    curl_for('PATCH', f.target_url, body), 'PATCH'))
+            # Champs seulement suspectés (heuristique non confirmée) : remontés mais
+            # clairement marqués SUSPECTED pour ne pas surévaluer.
+            for e in getattr(f, 'suspected_fields', []) or []:
+                owasp, impact, fix = _kb('mass_assignment')
+                body = {e.get('field'): e.get('value')}
+                out.append(Finding('Low', f"Mass assignment (suspected) — '{e.get('field')}'",
+                                   'mass_assignment', f.target_url, owasp, impact, fix,
+                                   curl_for('PATCH', f.target_url, body), 'PATCH',
+                                   status='suspected'))
         for f in getattr(adaptive_result, 'hidden_params', []) or []:
             for e in getattr(f, 'active_params', []) or []:
                 owasp, impact, fix = _kb('hidden_params')
@@ -147,9 +162,13 @@ def build_findings(all_findings: List[Dict], adaptive_result=None, target: str =
         sev = _SEV_NORM.get(str(f.get('risk', 'Low')).upper(), 'Low')
         url = f.get('url', target)
         out.append(Finding(sev, f.get('name', 'Finding'), source, url,
-                           owasp, impact, fix, curl_for('GET', url, auth=False), 'GET'))
+                           owasp, impact, fix, curl_for('GET', url, auth=False), 'GET',
+                           status=str(f.get('status', 'confirmed')),
+                           adjudication=str(f.get('adjudication', 'deterministic'))))
 
-    out.sort(key=lambda x: (_SEV_RANK.get(x.severity, 5), x.vector, x.title))
+    # Tri : gravité, puis confirmés avant suspectés, puis vecteur/titre.
+    out.sort(key=lambda x: (_SEV_RANK.get(x.severity, 5),
+                            0 if x.status == 'confirmed' else 1, x.vector, x.title))
     return out
 
 
@@ -159,8 +178,12 @@ def render_cli(findings: List[Finding]) -> str:
     lines = [f"\n{'='*64}", f"FINDINGS ({len(findings)}) — severity-sorted", '='*64]
     for f in findings:
         tag = f"  {f.owasp}" if f.owasp else ""
-        lines.append(f"\n[{f.severity.upper():<8}] {f.title}{tag}")
+        # Marqueur d'adjudication : on n'affiche le tag que pour le non-confirmé
+        # (le confirmé est l'attendu), avec la source si c'est l'IA qui a tranché.
+        vtag = "" if f.status == 'confirmed' else f"  «{f.status.upper()}»"
+        lines.append(f"\n[{f.severity.upper():<8}] {f.title}{vtag}{tag}")
         lines.append(f"  endpoint  {f.method} {f.endpoint}")
+        lines.append(f"  status    {f.status.upper()} ({f.adjudication})")
         lines.append(f"  impact    {f.impact}")
         lines.append(f"  proof     {f.proof}")
         lines.append(f"  fix       {f.fix}")
@@ -180,11 +203,15 @@ def render_html(findings: List[Finding], meta: Optional[Dict] = None) -> str:
     for f in findings:
         col = _SEV_COLOR.get(f.severity, '#6A6E76')
         owasp = f'<span class="owasp">{e(f.owasp)}</span>' if f.owasp else ''
+        # Badge d'adjudication : confirmé (vert) vs suspecté (ambre), + source.
+        vcol = '#2C7A70' if f.status == 'confirmed' else '#9A6B12'
+        vbadge = (f'<span class="verdict" style="--v:{vcol}">'
+                  f'{e(f.status.upper())} · {e(f.adjudication)}</span>')
         cards.append(f"""
       <article class="card" style="--sev:{col}">
         <div class="chead">
           <span class="sev">{e(f.severity)}</span>
-          <h3>{e(f.title)}</h3>{owasp}
+          <h3>{e(f.title)}</h3>{owasp}{vbadge}
         </div>
         <div class="ep"><span>{e(f.method)}</span> {e(f.endpoint)}</div>
         <p class="impact">{e(f.impact)}</p>
@@ -212,6 +239,7 @@ h1{{font-size:1.5rem;margin:0 0 4px}} .sub{{color:var(--muted);font-size:.9rem;m
 .chead h3{{margin:0;font-size:1.05rem;flex:1;min-width:200px}}
 .sev{{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff;background:var(--sev);padding:3px 8px;border-radius:999px}}
 .owasp{{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 7px}}
+.verdict{{font-size:.68rem;font-weight:700;letter-spacing:.05em;color:#fff;background:var(--v);padding:2px 8px;border-radius:999px}}
 .ep{{font-family:ui-monospace,monospace;font-size:.82rem;color:var(--muted);margin:10px 0}} .ep span{{color:var(--accent);font-weight:600}}
 .impact{{margin:8px 0 12px}}
 .label{{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:4px}}
