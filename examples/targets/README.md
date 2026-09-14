@@ -18,7 +18,7 @@ PORT=3001 ./examples/targets/juiceshop.sh
 | `vampi.sh` | `erev0s/vampi` | 5001 | API REST | matrice d'accès, BOLA, mass assignment, forge auth (API1/2/3/5) |
 | `juiceshop.sh` | `bkimminich/juice-shop` | 3000 | Web + REST | extrapolation de routes, JWT, BOLA (paniers/avis) |
 | `dvga.sh` | `dolevf/dvga` | 5013 | GraphQL | module `graphql` (introspection, batching, profondeur) |
-| `csm.sh` | build local (`csm/`) | 5005 | API REST | **chaînes** : SSRF→interne→admin, BOLA→clé API→takeover, mass assignment, JWT alg=none, business-flow, shadow |
+| `cms.sh` | build local (`cms/`) | 5005 | API REST | **chaînes** : SSRF→interne→admin, BOLA→clé API→takeover, mass assignment, JWT alg=none, business-flow, shadow ; **+ angles morts** : path traversal, SSTI, XSS, open redirect, reset prédictible, CORS, CSV |
 | `crapi.sh` | `OWASP/crAPI` (compose) | 8888 | Plateforme API | tout l'OWASP API Top 10 ; **lourde** (~8 services) |
 
 Les trois premières sont des **conteneurs uniques** vérifiés bootables ; `crapi.sh`
