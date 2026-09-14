@@ -1153,7 +1153,10 @@ def _run_web_probes(har_data, config, args, zap_client):
     Location (nécessaire à l'open redirect), redirections NON suivies."""
     from modules.web_probes import run_web_probes
     from modules.idor_detector import IDORDetector
+    from modules.llm.adaptive_idor import client_from_config
     auth = IDORDetector.extract_auth_tokens(har_data) or {}
+    # IA optionnelle : arbitre les near-miss en SUSPECTED (aucun effet offline).
+    adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
 
     def execute(url, method='GET', body=None):
         if zap_client is not None:
@@ -1174,7 +1177,7 @@ def _run_web_probes(har_data, config, args, zap_client):
         except Exception:
             return {'status': 0, 'body': '', 'location': '', 'content_type': ''}
 
-    out = run_web_probes(execute, har_data)
+    out = run_web_probes(execute, har_data, adjudicator=adjud)
     print(f"[WEB] {len(out)} blind-spot finding(s) "
           "(traversal/ssti/xss/open-redirect/weak-reset/csv)")
     return out
@@ -1493,7 +1496,16 @@ def run_diagnose(args):
         cors_results = cors_tester.run_tests()
         vuln = [r for r in cors_results if r.vulnerable]
         adv_results['cors'] = len(vuln)
-        all_findings.extend([{'source': 'cors', 'risk': 'Medium', 'name': 'CORS Misconfiguration', 'url': r.url} for r in vuln])
+        # Regroupement : la même misconfig CORS se répète sur chaque endpoint×origine.
+        # On émet UN finding de classe (avec le compte + un échantillon d'URLs) plutôt
+        # que des centaines de lignes qui noient le rapport.
+        if vuln:
+            sample = [r.url for r in vuln[:5]]
+            all_findings.append({
+                'source': 'cors', 'risk': 'Medium', 'name': 'CORS Misconfiguration',
+                'url': args.target, 'count': len(vuln),
+                'detail': f"{len(vuln)} endpoint/origin combination(s) affected; "
+                          f"e.g. {', '.join(sample)}"})
         print(f"  CORS: {len(vuln)}")
 
         from modules.cache_poisoning import CachePoisoningTester
