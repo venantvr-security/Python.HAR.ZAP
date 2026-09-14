@@ -35,6 +35,17 @@ _MONEY_FIELDS = re.compile(r'(qty|quantity|amount|price|total|count|balance|cred
 _ONESHOT_HINTS = ('coupon', 'promo', 'redeem', 'refund', 'apply', 'voucher', 'gift', 'claim')
 _ERROR_MARKERS = ('error', 'invalid', 'not allowed', 'forbidden', 'denied', 'unauthorized',
                   'required', 'must be', 'validation')
+# Verbes de TRANSITION d'état : ces actions promeuvent un objet dans un workflow
+# (brouillon -> publié, en attente -> approuvé). Sur une API sans contrôle, elles
+# sont franchissables sans l'étape d'approbation censée les garder (API6).
+_TRANSITION_VERBS = ('publish', 'approve', 'submit', 'activate', 'enable', 'moderate',
+                     'accept', 'promote', 'release', 'authorize', 'unlock', 'verify',
+                     'confirm', 'complete', 'finalize')
+# Marqueurs d'un état « promu » observé au readback : confirme que la transition a
+# réellement pris effet (et n'est pas un simple 200 sans conséquence).
+_PROMOTED_MARKERS = ('publish', 'approved', 'active', 'enabled', 'live', 'accepted',
+                     'completed', 'confirmed', 'released', 'verified')
+_VERSION_SEG = re.compile(r'^v\d+$', re.I)
 
 
 @dataclass
@@ -57,15 +68,18 @@ class Flow:
 
 @dataclass
 class FlowFinding:
-    kind: str          # state_skip / value_manipulation / replay
+    kind: str          # state_skip / value_manipulation / replay / workflow_transition
     severity: str
     title: str
     url: str
     detail: str = ''
     source_tag: str = 'business_flow'
+    status: str = 'confirmed'      # confirmed (preuve déterministe) | suspected
+    source: str = 'deterministic'  # deterministic | llm
 
     def flat(self) -> Dict:
-        return {'source': 'business_flow', 'risk': self.severity, 'name': self.title, 'url': self.url}
+        return {'source': 'business_flow', 'risk': self.severity, 'name': self.title,
+                'url': self.url, 'status': self.status, 'adjudication': self.source}
 
 
 def _json_body(req: Dict) -> Optional[Dict]:
@@ -93,10 +107,21 @@ def extract_flows(har_data: Dict) -> List[Flow]:
         if not url:
             continue
         headers = {h.get('name'): h.get('value') for h in req.get('headers', []) if h.get('name')}
-        segs = [s for s in urlparse(url).path.split('/') if s]
-        key = segs[1] if len(segs) > 1 else (segs[0] if segs else 'flow')
-        groups.setdefault(key, []).append(Step(method, url, _json_body(req), headers))
+        groups.setdefault(_flow_key(urlparse(url).path), []).append(
+            Step(method, url, _json_body(req), headers))
     return [Flow(name=k, steps=v) for k, v in groups.items() if v]
+
+
+def _flow_key(path: str) -> str:
+    """Nom de ressource = 1er segment non-version et non-numérique. Regroupe
+    `/v1/orders/cart` sous 'orders' ET `/articles/1/publish` sous 'articles'
+    (l'ancien `segs[1]` cassait ce dernier cas en le classant sous '1')."""
+    segs = [s for s in path.split('/') if s]
+    for s in segs:
+        if _VERSION_SEG.match(s) or s.isdigit():
+            continue
+        return s
+    return segs[0] if segs else 'flow'
 
 
 def _accepted(resp: Dict, adjudicator=None, context: str = '') -> bool:
@@ -114,6 +139,11 @@ def _accepted(resp: Dict, adjudicator=None, context: str = '') -> bool:
     return True
 
 
+def _last_seg(path: str) -> str:
+    segs = [s for s in path.split('/') if s]
+    return segs[-1].lower() if segs else ''
+
+
 def _guard_step(flow: Flow) -> Optional[Step]:
     for s in flow.steps:
         if any(h in s.path.lower() for h in _GUARD_HINTS):
@@ -124,10 +154,14 @@ def _guard_step(flow: Flow) -> Optional[Step]:
 class BusinessFlowScanner:
     """Exécute les abus de flux et adjuge l'acceptation par le serveur."""
 
-    def __init__(self, execute_fn: ExecuteFn, adjudicator=None, replay_n: int = 3):
+    def __init__(self, execute_fn: ExecuteFn, adjudicator=None, replay_n: int = 3,
+                 read_fn: Optional[Callable[[str], Dict]] = None):
         self.execute = execute_fn
         self.adjudicator = adjudicator
         self.replay_n = replay_n
+        # Lecture optionnelle (GET url -> {'status','body'}) pour CONFIRMER qu'une
+        # transition d'état a réellement pris effet (sinon verdict 'suspected').
+        self.read = read_fn
 
     def run(self, flows: List[Flow]) -> List[FlowFinding]:
         out: List[FlowFinding] = []
@@ -135,9 +169,51 @@ class BusinessFlowScanner:
             if len(flow.steps) >= 1:
                 out += self._value_manipulation(flow)
                 out += self._replay(flow)
+                out += self._workflow_transition(flow)
             if len(flow.steps) >= 2:
                 out += self._state_skip(flow)
         return out
+
+    # 4. Transition de workflow : franchir une promotion d'état (publish/approve/…)
+    #    sans l'étape d'approbation censée la garder. C'est le cœur d'API6 pour un
+    #    CMS/workflow, que les 3 abus « e-commerce » ci-dessus ne couvraient pas.
+    def _workflow_transition(self, flow: Flow) -> List[FlowFinding]:
+        out: List[FlowFinding] = []
+        seen = set()
+        for step in flow.steps:
+            verb = _last_seg(step.path)
+            if verb not in _TRANSITION_VERBS or step.path in seen:
+                continue
+            seen.add(step.path)
+            resp = self.execute(step.method, step.url, step.headers, step.body)
+            if not _accepted(resp, self.adjudicator, f"transition {step.path}"):
+                continue
+            # Readback : l'objet parent est-il réellement passé dans l'état promu ?
+            confirmed, evidence = self._confirm_transition(step, verb)
+            status = 'confirmed' if confirmed else 'suspected'
+            sev = 'High' if confirmed else 'Medium'
+            logger.info("flow_transition", flow=flow.name, endpoint=step.path,
+                        confirmed=confirmed)
+            out.append(FlowFinding('workflow_transition', sev,
+                f"Sensitive business flow — '{verb}' transition reachable without approval",
+                step.url,
+                evidence or f"'{verb}' accepted in a single session with no approval step",
+                status=status))
+        return out
+
+    def _confirm_transition(self, step: Step, verb: str):
+        """GET l'objet parent (URL sans le segment verbe) et cherche un marqueur
+        d'état promu. Retourne (confirmé, preuve)."""
+        if self.read is None:
+            return False, ''
+        parent = step.url.rsplit('/' + verb, 1)[0]
+        if parent == step.url:
+            return False, ''
+        r = self.read(parent) or {}
+        body = ((r.get('body', '') or '')).lower()
+        if 200 <= int(r.get('status', 0)) < 300 and any(m in body for m in _PROMOTED_MARKERS):
+            return True, f"readback {urlparse(parent).path} confirms promoted state after '{verb}'"
+        return False, ''
 
     # 1. Saut d'état : exécuter l'étape finale sans les gardiennes.
     def _state_skip(self, flow: Flow) -> List[FlowFinding]:

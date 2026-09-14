@@ -1061,9 +1061,13 @@ def _run_business_flow(har_data, config, args, zap_client):
         except Exception:
             return {'status': 0, 'body': ''}
 
+    def read(url):
+        """GET pour confirmer qu'une transition d'état a bien pris effet (readback)."""
+        return execute('GET', url, {}, None)
+
     adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
     flows = extract_flows(har_data)
-    findings = BusinessFlowScanner(execute, adjudicator=adjud).run(flows)
+    findings = BusinessFlowScanner(execute, adjudicator=adjud, read_fn=read).run(flows)
     flat = [f.flat() for f in findings]
     print(f"[BUSINESS-FLOW] {len(flows)} flow(s), {len(flat)} abuse(s) accepted")
     return flat
