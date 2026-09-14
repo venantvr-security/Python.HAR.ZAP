@@ -202,15 +202,12 @@ class AdaptiveIDORLoop:
                            "200 with credible cross-user body", "offline")
 
     def _interpret_llm(self, obs: IDORObservation, baseline: IDORObservation) -> Optional[IDORVerdict]:
-        prompt = (
-            "You are adjudicating an IDOR test. Decide if the TEST response is another "
-            "user's data (a real leak) or a generic error/empty/own-data page. "
-            'Return JSON {"is_leak": bool, "confidence": number(0-1), "reason": str}.\n'
-            f"BASELINE (authorized, id={baseline.candidate_id}): status={baseline.status} "
-            f"len={baseline.content_length} body={baseline.body[:600]!r}\n"
-            f"TEST (id={obs.candidate_id}): status={obs.status} len={obs.content_length} "
-            f"body={obs.body[:600]!r}"
-        )
+        from .prompts import get_prompt
+        prompt = get_prompt('idor_interpret').render_user(
+            baseline_id=baseline.candidate_id, baseline_status=baseline.status,
+            baseline_len=baseline.content_length, baseline_body=repr(baseline.body[:600]),
+            test_id=obs.candidate_id, test_status=obs.status,
+            test_len=obs.content_length, test_body=repr(obs.body[:600]))
         data = self._ask_json(prompt)
         if isinstance(data, dict) and 'is_leak' in data:
             return IDORVerdict(bool(data['is_leak']),
@@ -249,13 +246,10 @@ class AdaptiveIDORLoop:
     def _refine_llm(self, target: Dict, history: List, tried: set) -> List[str]:
         summary = [{'id': o.candidate_id, 'status': o.status, 'len': o.content_length,
                     'leak': v.is_leak} for o, v in history]
-        prompt = (
-            "Given these IDOR enumeration results, propose the next object ids most "
-            "likely to expose another user's data. Return JSON as an array of string ids.\n"
-            f"Endpoint: {target.get('url')}\n"
-            f"Original id: {target.get('original_value')}\n"
-            f"Results so far: {json.dumps(summary)}"
-        )
+        from .prompts import get_prompt
+        prompt = get_prompt('idor_refine').render_user(
+            url=target.get('url'), original_id=target.get('original_value'),
+            results=json.dumps(summary))
         data = self._ask_json(prompt)
         if isinstance(data, list):
             return [str(x) for x in data if str(x) not in tried][:self.per_round]
@@ -263,9 +257,9 @@ class AdaptiveIDORLoop:
 
     # --- utilitaire LLM -------------------------------------------------------
     def _ask_json(self, prompt: str):
+        from .prompts.historical import SYS_SEC_REQUESTED
         try:
-            resp = self.client.complete(
-                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            resp = self.client.complete(prompt, system=SYS_SEC_REQUESTED)
             return _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("adaptive_idor_llm_failed", error=str(e))

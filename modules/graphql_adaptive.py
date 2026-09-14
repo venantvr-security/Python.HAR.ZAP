@@ -6,7 +6,6 @@ L'IA sert au seul endroit qui le mérite — générer des requêtes d'attaque c
 partir du schéma introspecté (génération sous contexte) ; sinon des gabarits
 d'abus connus (batching/aliasing, imbrication profonde) prennent le relais.
 """
-import json
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
@@ -53,15 +52,11 @@ def _template_queries() -> List[str]:
 def generate_attack_queries(schema_json: str, client=None, limit: int = 8) -> List[str]:
     """Requêtes d'attaque ciblées. LLM à partir du schéma si dispo, sinon gabarits."""
     if client is not None and schema_json:
-        prompt = (
-            f"From this GraphQL schema, propose up to {limit} attack queries (deep nesting, "
-            "aliasing/batching DoS, sensitive-field access, mutation abuse). "
-            "Return JSON as an array of GraphQL query strings.\n"
-            f"Schema: {schema_json[:4000]}"
-        )
+        from .llm.prompts import get_prompt
+        system, user = get_prompt('graphql_attack').render(
+            limit=limit, schema=schema_json[:4000])
         try:
-            resp = client.complete(
-                prompt, system="You are a GraphQL security expert. Answer only with the requested JSON.")
+            resp = client.complete(user, system=system)
             from .llm.adaptive_idor import _extract_json
             data = _extract_json(getattr(resp, 'content', None))
             if isinstance(data, list) and data:
