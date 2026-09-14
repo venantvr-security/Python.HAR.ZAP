@@ -80,3 +80,43 @@ class TestScanner:
     def test_findings_flat(self):
         f = BusinessFlowScanner(_vuln_server).run(extract_flows(HAR))[0].flat()
         assert f['source'] == 'business_flow' and 'risk' in f
+        assert 'status' in f and 'adjudication' in f
+
+
+class TestFlowKey:
+    def test_groups_action_under_resource_without_version(self):
+        # /articles/1/publish doit rejoindre /articles, pas être classé sous '1'
+        har = {"log": {"entries": [
+            _entry("POST", "https://x/articles", '{"title":"t"}'),
+            _entry("POST", "https://x/articles/1/publish"),
+        ]}}
+        flows = {f.name: f for f in extract_flows(har)}
+        assert 'articles' in flows and len(flows['articles'].steps) == 2
+
+
+class TestWorkflowTransition:
+    HAR = {"log": {"entries": [
+        _entry("POST", "https://x/articles", '{"title":"t"}'),
+        _entry("POST", "https://x/articles/2/publish"),
+    ]}}
+
+    def test_transition_suspected_without_readback(self):
+        srv = lambda m, u, h, b: {"status": 200, "body": "ok"}
+        fs = BusinessFlowScanner(srv).run(extract_flows(self.HAR))
+        wt = [f for f in fs if f.kind == 'workflow_transition']
+        assert wt and wt[0].status == 'suspected' and "publish" in wt[0].title
+
+    def test_transition_confirmed_with_readback(self):
+        def srv(m, u, h, b):
+            return {"status": 200, "body": "ok"}
+        def read(url):
+            # l'objet parent revient à l'état promu -> preuve
+            return {"status": 200, "body": '{"id":2,"status":"published"}'}
+        fs = BusinessFlowScanner(srv, read_fn=read).run(extract_flows(self.HAR))
+        wt = [f for f in fs if f.kind == 'workflow_transition']
+        assert wt and wt[0].status == 'confirmed' and wt[0].severity == 'High'
+
+    def test_transition_denied_not_flagged(self):
+        srv = lambda m, u, h, b: {"status": 403, "body": "forbidden"}
+        fs = BusinessFlowScanner(srv).run(extract_flows(self.HAR))
+        assert not any(f.kind == 'workflow_transition' for f in fs)
