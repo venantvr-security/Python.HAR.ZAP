@@ -194,13 +194,29 @@ class HTTPSmugglingTester:
 
         return None
 
+    def _timed_send(self, host, port, request, use_ssl):
+        """Envoie une requête brute et rend (a_bloqué, secondes)."""
+        import time
+        start = time.time()
+        resp = self._send_raw_request(host, port, request, use_ssl)
+        elapsed = time.time() - start
+        hung = (resp == b'TIMEOUT') or (elapsed >= self.timeout - 0.5)
+        return hung, elapsed
+
     def test_timing_based(self, base_url: str) -> Optional[SmugglingResult]:
         """
-        Timing-based smuggling detection
-        Send requests that should cause timeout on vulnerable servers
-        """
-        import time
+        Détection de desync CL.TE par différentiel de temps.
 
+        Piège du FP : envoyer `Content-Length: N` avec un corps plus court fait
+        BLOQUER n'importe quel serveur conforme — il attend les N octets promis.
+        Un simple délai ne prouve donc RIEN (tout origine directe « hang »).
+
+        On isole la cause avec un CONTRÔLE : une requête incomplète pour une raison
+        GÉNÉRIQUE (Content-Length trop grand, SANS Transfer-Encoding). Si ce contrôle
+        bloque aussi, le hang vient du blocage CL normal, pas d'un desync → aucun
+        finding. On ne conclut au smuggling que si la requête ambiguë CL+TE bloque
+        ALORS QUE le contrôle répond vite : là, seul le désaccord TE/CL explique le
+        délai (signature d'un vrai front-end/back-end en désaccord)."""
         parsed = urlparse(base_url)
         host = parsed.netloc
         use_ssl = parsed.scheme == 'https'
@@ -210,31 +226,36 @@ class HTTPSmugglingTester:
             host, port_str = host.rsplit(':', 1)
             port = int(port_str)
 
-        # CL.TE timing payload - incomplete chunked body
-        timing_payload = {
-            'headers': {
-                'Content-Length': '4',
-                'Transfer-Encoding': 'chunked'
-            },
-            'body': '1\r\n'  # Incomplete chunk - server waits
-        }
+        # Contrôle : incomplet via Content-Length seul (aucune ambiguïté TE/CL).
+        control = self._build_raw_request(parsed.netloc, {
+            'headers': {'Content-Length': '8'},
+            'body': 'abc',            # 3 octets < 8 -> tout serveur CL-conforme attend
+        })
+        control_hung, t_control = self._timed_send(host, port, control, use_ssl)
 
-        request = self._build_raw_request(parsed.netloc, timing_payload)
+        # Un serveur qui bloque déjà sur un simple corps incomplet ne peut pas servir
+        # de preuve de desync : le différentiel serait nul. On s'arrête (pas de FP).
+        if control_hung:
+            return None
 
-        start = time.time()
-        self._send_raw_request(host, port, request, use_ssl)  # réponse ignorée : seul le temps de réponse compte ici
-        elapsed = time.time() - start
+        # Attaque : corps incomplet ET ambiguïté CL+TE.
+        attack = self._build_raw_request(parsed.netloc, {
+            'headers': {'Content-Length': '4', 'Transfer-Encoding': 'chunked'},
+            'body': '1\r\n',
+        })
+        attack_hung, t_attack = self._timed_send(host, port, attack, use_ssl)
 
-        # If response took significantly longer than normal
-        if elapsed > 5:
+        # Différentiel : l'ambiguïté CL+TE bloque, le contrôle non -> desync probable.
+        if attack_hung and not control_hung:
             return SmugglingResult(
                 url=base_url,
                 variant='CL.TE_timing',
                 vulnerable=True,
                 confidence=0.7,
                 evidence={
-                    'response_time': round(elapsed, 2),
-                    'method': 'timing-based detection'
+                    'attack_time': round(t_attack, 2),
+                    'control_time': round(t_control, 2),
+                    'method': 'timing differential (attack hung, control did not)'
                 }
             )
 

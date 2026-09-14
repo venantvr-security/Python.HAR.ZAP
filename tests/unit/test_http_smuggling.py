@@ -160,6 +160,37 @@ class TestHTTPSmugglingTester:
         assert 'Content-Length' in payload['headers']
 
 
+class TestTimingDifferential:
+    """Le timing-based ne doit PAS crier au loup quand un serveur bloque juste sur
+    un corps incomplet (cas d'un origine directe conforme) — seul le différentiel
+    CL+TE (attaque bloque, contrôle non) prouve un desync."""
+
+    def _tester(self, sample_har):
+        return HTTPSmugglingTester(sample_har, {'smuggling_timeout': 5})
+
+    def test_generic_incomplete_body_is_not_flagged(self, sample_har):
+        """Serveur qui bloque sur TOUT corps incomplet (CL) : contrôle bloque -> None."""
+        t = self._tester(sample_har)
+        t._send_raw_request = lambda *a, **k: b'TIMEOUT'   # tout bloque
+        assert t.test_timing_based('http://localhost:5005') is None
+
+    def test_real_desync_is_flagged(self, sample_har):
+        """Contrôle répond vite, attaque (CL+TE) bloque -> desync signalé."""
+        t = self._tester(sample_har)
+
+        def fake(host, port, request, use_ssl):
+            # l'attaque porte Transfer-Encoding ; le contrôle non
+            return b'TIMEOUT' if b'Transfer-Encoding' in request else b'HTTP/1.1 200 OK\r\n\r\n'
+        t._send_raw_request = fake
+        res = t.test_timing_based('http://localhost:5005')
+        assert res is not None and res.vulnerable and res.variant == 'CL.TE_timing'
+
+    def test_all_fast_not_flagged(self, sample_har):
+        t = self._tester(sample_har)
+        t._send_raw_request = lambda *a, **k: b'HTTP/1.1 200 OK\r\n\r\n'
+        assert t.test_timing_based('http://localhost:5005') is None
+
+
 class TestSmugglingResult:
     """Test SmugglingResult dataclass"""
 
