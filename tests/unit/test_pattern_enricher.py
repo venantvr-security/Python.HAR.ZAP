@@ -33,6 +33,22 @@ class TestPatternEnricher:
         ma_content = ma_txt.read_text()
         assert 'role=admin' in ma_content and 'is_admin=True' in ma_content
 
+    def test_records_proven_payloads_to_zap(self, tmp_path):
+        """Les charges prouvées (SSRF/traversal/SSTI/XSS/redirect) -> wordlists."""
+        enr = PatternEnricher.for_run(domain='demo.com', base_path=str(tmp_path))
+        assert enr.record_payloads('ssrf', ['http://169.254.169.254/', 'file:///etc/passwd']) == 2
+        assert enr.record_payloads('xss', ['<svg/onload=alert(1)>']) == 1
+        # dédoublonnage
+        assert enr.record_payloads('path_traversal', ['../etc/passwd', '../etc/passwd']) == 1
+        exported = enr.flush()
+        assert {'ssrf', 'xss', 'path_traversal'} <= set(exported)
+        ssrf_txt = tmp_path / 'zap_export' / 'fuzzers' / 'llm_ssrf.txt'
+        assert 'file:///etc/passwd' in ssrf_txt.read_text()
+
+    def test_record_payloads_inactive_noop(self):
+        enr = PatternEnricher(store=None, session_id=None)
+        assert enr.record_payloads('ssrf', ['http://x/']) == 0
+
     def test_no_leaks_records_nothing(self, tmp_path):
         enr = PatternEnricher.for_run(domain='demo.com', base_path=str(tmp_path))
         assert enr.record_idor([_IDOR('https://x/users/42', [])]) == 0

@@ -59,8 +59,18 @@ class PatternStore:
         'regex_patterns',
         'race_conditions',
         'business_logic',
-        'prioritized_endpoints'
+        'prioritized_endpoints',
+        # Classes « payload » alimentées par les sondes actives (SSRF corps/query,
+        # path traversal, SSTI, XSS, open redirect). Une ligne = une charge PROUVÉE
+        # efficace, réutilisable telle quelle comme wordlist de fuzzer ZAP.
+        'ssrf',
+        'path_traversal',
+        'ssti',
+        'xss',
+        'open_redirect',
     ]
+    # Types dont la wordlist est une simple liste de charges (champ 'payload').
+    _PAYLOAD_TYPES = ('ssrf', 'path_traversal', 'ssti', 'xss', 'open_redirect')
 
     def __init__(self, base_path: str = './patterns'):
         self.base_path = Path(base_path)
@@ -245,6 +255,10 @@ class PatternStore:
                 elif pattern_type == 'idor':
                     mutations = p.get('mutations', [])
                     lines.extend(mutations)
+                elif pattern_type in self._PAYLOAD_TYPES:
+                    payload = p.get('payload', '')
+                    if payload:
+                        lines.append(payload)
                 else:
                     # Generic: use string representation
                     lines.append(json.dumps(p))
@@ -288,7 +302,8 @@ class PatternStore:
         exported = {}
 
         # Copy TXT files to fuzzers directory
-        for pattern_type in ['mass_assignment', 'hidden_params', 'idor']:
+        for pattern_type in ['mass_assignment', 'hidden_params', 'idor',
+                             'ssrf', 'path_traversal', 'ssti', 'xss', 'open_redirect']:
             txt_file = session_dir / f'{pattern_type}.txt'
             if txt_file.exists():
                 dest = self.zap_export_path / 'fuzzers' / f'llm_{pattern_type}.txt'
