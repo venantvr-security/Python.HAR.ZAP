@@ -515,6 +515,10 @@ web:
 # =============================================================================
 llm:
   enabled: true
+  # Attestation d'autorisation de l'opérateur. Les appels IA (prompts génératifs
+  # offensifs) ne partent QUE si ceci est vrai, ou via --i-am-authorized /
+  # HARZAP_AI_AUTHORIZED=1. Sans attestation, tout reste en heuristique hors-ligne.
+  authorized: false
   provider: "anthropic"  # "anthropic" | "gemini"
   model: "claude-sonnet-4-20250514"
   # Anthropic: HARZAP_LLM_API_KEY

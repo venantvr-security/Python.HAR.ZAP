@@ -13,6 +13,18 @@ from modules.utils import get_logger, RateLimiter, create_http_session
 logger = get_logger("llm.client")
 
 
+def ai_authorized(config: Optional[Dict] = None) -> bool:
+    """L'opérateur a-t-il attesté son autorisation de tester la cible ?
+
+    Vrai si l'env HARZAP_AI_AUTHORIZED est vrai, ou si config['llm']['authorized']
+    l'est. Sans attestation, les appels IA (prompts génératifs offensifs) ne
+    doivent PAS partir : c'est la condition d'usage responsable de l'outil."""
+    import os as _os
+    if _os.environ.get('HARZAP_AI_AUTHORIZED', '').lower() in ('1', 'true', 'yes'):
+        return True
+    return bool((config or {}).get('llm', {}).get('authorized', False))
+
+
 @dataclass
 class LLMConfig:
     """LLM configuration."""
@@ -25,6 +37,9 @@ class LLMConfig:
     timeout: int = 60
     max_retries: int = 3
     requests_per_minute: float = 10.0
+    # Attestation d'autorisation de l'opérateur : quand True, un préambule
+    # d'autorisation est préfixé à chaque persona système (voir prompts.system).
+    authorized: bool = False
     # Gemini batch settings (inline, no GCS required)
     batch_enabled: bool = False
     batch_poll_interval: float = 5.0
@@ -80,6 +95,13 @@ class LLMClient:
         Send completion request to LLM.
         Dispatches to appropriate provider.
         """
+        # Préfixe le préambule d'autorisation quand l'opérateur a attesté.
+        # Placé ICI (sous la couche replay) : la clé de replay est calculée en
+        # amont sur le system d'origine, donc record/replay restent cohérents.
+        if self.config.authorized:
+            from .prompts.system import AUTHORIZATION_PREAMBLE
+            system = f"{AUTHORIZATION_PREAMBLE}\n\n{system}" if system else AUTHORIZATION_PREAMBLE
+
         if self.config.provider == "anthropic":
             return self._complete_anthropic(prompt, system)
         elif self.config.provider == "gemini":
@@ -329,5 +351,6 @@ class LLMClient:
             requests_per_minute=llm_config.get('requests_per_minute', 10.0),
             batch_enabled=batch_enabled,
             batch_poll_interval=llm_config.get('batch_poll_interval', 5.0),
-            batch_max_wait=llm_config.get('batch_max_wait', 3600)
+            batch_max_wait=llm_config.get('batch_max_wait', 3600),
+            authorized=ai_authorized(config),
         ))
