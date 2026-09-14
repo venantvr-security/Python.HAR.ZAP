@@ -1,5 +1,6 @@
 """Tests des sondes actives API4 / API7 / API2."""
-from modules.active_probes import probe_rate_limit, probe_ssrf, probe_auth, _decode_jwt
+from modules.active_probes import (probe_rate_limit, probe_ssrf, probe_auth,
+                                   ssrf_targets, _decode_jwt)
 import base64, json
 
 
@@ -29,6 +30,55 @@ class TestSSRF:
         fs = probe_ssrf(lambda u, m: {'status': 200, 'body': 'x'},
                         [{'url': 'https://x/a?name=bob', 'method': 'GET'}])
         assert fs == []
+
+    def test_body_param_marker_hit(self):
+        """SSRF injectée dans un corps JSON (POST {"url": ...}), pas la query."""
+        seen = {}
+
+        def srv(url, method, body=None):
+            seen['body'] = body
+            leak = body and 'file:///etc/passwd' in json.dumps(body)
+            return {'status': 200, 'body': 'root:x:0:0' if leak else 'ok'}
+        fs = probe_ssrf(srv, [{'url': 'https://x/media/fetch', 'method': 'POST',
+                               'body': {'url': 'http://legit/logo.png'}}])
+        assert fs and fs[0].category == 'API7' and fs[0].severity == 'Critical'
+        assert "body 'url'" in fs[0].title
+
+    def test_nested_body_param(self):
+        """La clé url-ish peut être imbriquée dans le corps."""
+        def srv(url, method, body=None):
+            leak = body and '169.254.169.254' in json.dumps(body)
+            return {'status': 200, 'body': 'instance-id: i-9' if leak else 'ok'}
+        fs = probe_ssrf(srv, [{'url': 'https://x/hook', 'method': 'POST',
+                               'body': {'config': {'callback_url': 'http://a'}}}])
+        assert fs and "body 'config.callback_url'" in fs[0].title
+
+    def test_legacy_two_arg_executor_still_works(self):
+        """Rétro-compat : un exécuteur (url, method) sans corps reste accepté."""
+        def srv(url, method):
+            return {'status': 200, 'body': 'ami-id: ami-1'} if '169.254' in url else {'status': 200, 'body': 'ok'}
+        fs = probe_ssrf(srv, [{'url': 'https://x/f?url=http://a', 'method': 'GET'}])
+        assert fs and fs[0].severity == 'Critical'
+
+
+class TestSSRFTargets:
+    def test_extracts_body_url_target(self):
+        har = {"log": {"entries": [{"request": {"method": "POST", "url": "https://x/media/fetch",
+               "postData": {"text": json.dumps({"url": "http://a", "title": "t"})}}}]}}
+        ts = ssrf_targets(har)
+        assert len(ts) == 1 and ts[0]['method'] == 'POST'
+        assert ts[0]['body'] == {"url": "http://a", "title": "t"}
+
+    def test_extracts_query_url_target(self):
+        har = {"log": {"entries": [{"request": {"method": "GET",
+               "url": "https://x/proxy?target=http://a"}}]}}
+        ts = ssrf_targets(har)
+        assert len(ts) == 1 and ts[0]['body'] is None
+
+    def test_skips_non_urlish(self):
+        har = {"log": {"entries": [{"request": {"method": "POST", "url": "https://x/login",
+               "postData": {"text": json.dumps({"username": "bob"})}}}]}}
+        assert ssrf_targets(har) == []
 
 
 class TestAuth:

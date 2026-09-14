@@ -82,39 +82,139 @@ def probe_rate_limit(execute_fn: Callable[[str, str], Dict], url: str,
 # =============================================================================
 # API7 — Server-Side Request Forgery
 # =============================================================================
-def probe_ssrf(execute_fn: Callable[[str, str], Dict], targets: List[Dict],
+def _iter_urlish_in_body(obj, path=()):
+    """Parcourt un corps JSON et rend (chemin, valeur) pour chaque feuille chaîne
+    dont la CLÉ est url-ish — imbrication et listes comprises. Le point d'injection
+    SSRF le plus courant (POST /media/fetch {"url": "..."}) vit dans le corps, pas
+    dans la query : c'était l'angle mort de la sonde."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)):
+                yield from _iter_urlish_in_body(v, path + (k,))
+            elif isinstance(v, str) and _URLISH_PARAM.search(str(k)):
+                yield path + (k,), v
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _iter_urlish_in_body(v, path + (i,))
+
+
+def _set_in(obj, path, value):
+    """Copie profonde de `obj` avec la feuille `path` remplacée par `value`."""
+    import copy
+    new = copy.deepcopy(obj)
+    cur = new
+    for p in path[:-1]:
+        cur = cur[p]
+    cur[path[-1]] = value
+    return new
+
+
+def _call(execute_fn, url, method, body):
+    """Appelle l'exécuteur en tolérant l'ancienne signature (url, method) : les
+    exécuteurs qui savent poster un corps reçoivent `body`, les autres non."""
+    try:
+        return execute_fn(url, method, body) or {}
+    except TypeError:
+        return execute_fn(url, method) or {}
+
+
+def _probe_point(execute_fn, method, mutate, label, adjudicator) -> Optional[ProbeFinding]:
+    """Teste un point d'injection unique (query OU corps) : `mutate(payload)` rend
+    le couple (url, body) à envoyer. Marqueur interne = CONFIRMED ; sinon
+    l'adjudicateur LLM optionnel tranche l'ambigu (SUSPECTED)."""
+    for payload in _SSRF_PAYLOADS:
+        probe_url, probe_body = mutate(payload)
+        r = _call(execute_fn, probe_url, method, probe_body)
+        body = (r.get('body', '') or '')
+        if any(m in body for m in _SSRF_MARKERS):
+            return ProbeFinding('API7', 'Critical',
+                f"SSRF via {label} — internal resource reflected",
+                probe_url, f"payload {payload}")
+        if adjudicator is not None and getattr(adjudicator, 'available', False):
+            v = adjudicator.classify_owasp(
+                {'alert': f'Possible SSRF via {label}={payload}', 'url': probe_url},
+                {'API7:2023': 'SSRF'})
+            if v:
+                return ProbeFinding('API7', 'High',
+                    f"SSRF suspected via {label} (LLM-adjudicated)",
+                    probe_url, v.get('reason', ''), source='llm', confidence=0.6)
+    return None
+
+
+def probe_ssrf(execute_fn: Callable, targets: List[Dict],
                adjudicator=None) -> List[ProbeFinding]:
-    """Injecte des URLs internes dans les paramètres url-ish. Détection par
-    marqueurs (déterministe) ; l'adjudicateur LLM optionnel tranche l'ambigu."""
+    """Injecte des URLs internes dans les paramètres url-ish, en query STRING **et**
+    dans le corps JSON (clé imbriquée comprise). Détection par marqueurs
+    (déterministe) ; l'adjudicateur LLM optionnel tranche l'ambigu.
+
+    `execute_fn(url, method, body=None)` : quand un corps est fourni, l'exécuteur
+    doit le poster (JSON). Les exécuteurs à 2 arguments restent tolérés (cf. _call)."""
     findings: List[ProbeFinding] = []
     for t in targets:
         url, method = t.get('url', ''), t.get('method', 'GET')
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
-        urlish = [p for p in params if _URLISH_PARAM.search(p)]
-        for param in urlish:
-            for payload in _SSRF_PAYLOADS:
-                q = dict(params)
-                q[param] = [payload]
-                probe_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path,
-                                        parsed.params, urlencode(q, doseq=True), parsed.fragment))
-                r = execute_fn(probe_url, method) or {}
-                body = (r.get('body', '') or '')
-                if any(m in body for m in _SSRF_MARKERS):
-                    findings.append(ProbeFinding('API7', 'Critical',
-                        f"SSRF via '{param}' — internal resource reflected",
-                        probe_url, f"payload {payload}"))
-                    break  # un hit suffit pour ce paramètre
-                elif adjudicator is not None and getattr(adjudicator, 'available', False):
-                    v = adjudicator.classify_owasp(
-                        {'alert': f'Possible SSRF via {param}={payload}',
-                         'url': probe_url}, {'API7:2023': 'SSRF'})
-                    if v:
-                        findings.append(ProbeFinding('API7', 'High',
-                            f"SSRF suspected via '{param}' (LLM-adjudicated)",
-                            probe_url, v.get('reason', ''), source='llm', confidence=0.6))
-                        break
+
+        # 1) Injection dans la query string.
+        for param in [p for p in params if _URLISH_PARAM.search(p)]:
+            def mutate(payload, _p=param, _params=params, _parsed=parsed):
+                q = dict(_params)
+                q[_p] = [payload]
+                probe_url = urlunparse((_parsed.scheme, _parsed.netloc, _parsed.path,
+                                        _parsed.params, urlencode(q, doseq=True),
+                                        _parsed.fragment))
+                return probe_url, None
+            f = _probe_point(execute_fn, method, mutate, f"query '{param}'", adjudicator)
+            if f:
+                findings.append(f)
+
+        # 2) Injection dans le corps JSON (POST/PUT/PATCH avec une clé url-ish).
+        body = t.get('body')
+        if isinstance(body, (dict, list)):
+            for bpath, _ in _iter_urlish_in_body(body):
+                label = "body '" + '.'.join(str(p) for p in bpath) + "'"
+
+                def mutate(payload, _bp=bpath, _body=body, _url=url):
+                    return _url, _set_in(_body, _bp, payload)
+                f = _probe_point(execute_fn, method, mutate, label, adjudicator)
+                if f:
+                    findings.append(f)
     return findings
+
+
+def ssrf_targets(har_data: Dict, limit: int = 12) -> List[Dict]:
+    """Cibles SSRF extraites du HAR : toute requête dont un paramètre url-ish
+    apparaît en query string OU dans le corps JSON. Contrairement à get_targets
+    (GET seulement), inclut les écritures (POST/PUT/PATCH) et leur corps parsé."""
+    out: List[Dict] = []
+    seen = set()
+    for e in (har_data or {}).get('log', {}).get('entries', []) or []:
+        req = e.get('request', {})
+        url = req.get('url', '')
+        method = (req.get('method', 'GET') or 'GET').upper()
+        parsed = urlparse(url)
+        has_query_urlish = any(_URLISH_PARAM.search(p) for p in parse_qs(parsed.query))
+
+        body = None
+        text = (req.get('postData', {}) or {}).get('text', '')
+        if text:
+            try:
+                parsed_body = json.loads(text)
+                if any(True for _ in _iter_urlish_in_body(parsed_body)):
+                    body = parsed_body
+            except Exception:
+                body = None
+
+        if not has_query_urlish and body is None:
+            continue
+        key = (method, parsed.path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({'url': url, 'method': method, 'body': body})
+        if len(out) >= limit:
+            break
+    return out
 
 
 # =============================================================================

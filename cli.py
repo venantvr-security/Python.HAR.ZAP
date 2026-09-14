@@ -974,18 +974,21 @@ def _zap_reachable(zap_url, timeout=1.5):
 
 
 def _diag_http_get(zap_client, auth):
-    """Exécuteur GET (url, method) via ZAP si dispo, sinon requests direct."""
+    """Exécuteur (url, method, body=None) via ZAP si dispo, sinon requests direct.
+    `body` (dict) permet à la sonde SSRF d'injecter dans un corps JSON, pas
+    seulement dans la query string."""
     if zap_client is not None:
-        def get(url, method='GET'):
-            r = zap_client.request(method, url, headers=auth, follow_redirects=False)
+        def get(url, method='GET', body=None):
+            r = zap_client.request(method, url, headers=auth, json_data=body,
+                                   follow_redirects=False)
             return {'status': r.status_code, 'content_length': len(r.content or b''),
                     'body': (r.text or '')[:2000]}
         return get
     import requests
 
-    def get(url, method='GET'):
+    def get(url, method='GET', body=None):
         try:
-            r = requests.request(method, url, headers=auth, timeout=10,
+            r = requests.request(method, url, headers=auth, json=body, timeout=10,
                                  verify=False, allow_redirects=False)
             return {'status': r.status_code, 'content_length': len(r.content), 'body': r.text[:2000]}
         except Exception:
@@ -995,7 +998,7 @@ def _diag_http_get(zap_client, auth):
 
 def _run_active_probes(har_data, config, args, zap_client):
     """Sondes API2/API4/API7. auth = statique ; rate-limit/SSRF = via exécuteur."""
-    from modules.active_probes import probe_auth, probe_rate_limit, probe_ssrf
+    from modules.active_probes import probe_auth, probe_rate_limit, probe_ssrf, ssrf_targets
     from modules.llm.adaptive_campaign import get_targets
     from modules.idor_detector import IDORDetector
     from modules.llm.adaptive_idor import client_from_config
@@ -1010,10 +1013,11 @@ def _run_active_probes(har_data, config, args, zap_client):
         f = probe_rate_limit(get, targets[0]['url'], targets[0].get('method', 'GET'), burst=15)
         if f:
             out.append(f.flat())
-    # API7 : SSRF sur les endpoints aux paramètres url-ish.
+    # API7 : SSRF sur les paramètres url-ish, en query ET dans le corps JSON
+    # (POST /media/fetch {"url": ...}). `get` accepte désormais un corps.
     adjud = client_from_config(config) if getattr(args, 'ai', False) else None
     ssrf_adj = _OwaspAdj(adjud) if adjud else None
-    for f in probe_ssrf(lambda u, m='GET': get(u, m), targets, adjudicator=ssrf_adj):
+    for f in probe_ssrf(get, ssrf_targets(har_data, limit=12), adjudicator=ssrf_adj):
         out.append(f.flat())
     if out:
         print(f"[PROBES] {len(out)} finding(s) (auth/rate-limit/ssrf)")
