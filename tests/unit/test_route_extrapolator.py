@@ -35,6 +35,24 @@ class TestOffline:
         assert ("GET", "/users/v1") not in pairs      # déjà observé
         assert ("GET", "/users/v1/{id}") not in pairs
 
+    def test_wellknown_shadow_paths_always_present(self):
+        """Le dictionnaire shadow racine (déterministe) est toujours proposé."""
+        model = APIModel.from_har(HAR)
+        paths = {c.path for c in extrapolate_routes(model)}
+        for p in ('/debug/config', '/actuator/env', '/.env', '/.git/config',
+                  '/swagger.json', '/metrics'):
+            assert p in paths, p
+
+    def test_wellknown_shadow_present_even_with_llm(self):
+        """Même avec un client LLM, le catalogue déterministe reste ajouté."""
+        class _Client:
+            def complete(self, user, system=None):
+                class R: content = json.dumps([{"method": "GET", "path": "/guessed"}])
+                return R()
+        model = APIModel.from_har(HAR)
+        paths = {c.path for c in extrapolate_routes(model, client=_Client())}
+        assert "/guessed" in paths and "/debug/config" in paths
+
 
 class TestLLM:
     def test_llm_candidates_used(self):

@@ -38,6 +38,37 @@ _SENSITIVE_SUFFIXES = ('_debug', 'debug', 'admin', 'export', 'all', 'dump',
 _SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
 _PARAM_RE = re.compile(r'^\{.+\}$')
 
+# Chemins « shadow » bien connus, indépendants des ressources observées : debug,
+# actuator, secrets/VCS, doc d'API, métriques… C'est de la découverte de contenu
+# DÉTERMINISTE (aucun LLM) — exactement le dictionnaire qu'un pentester lance à la
+# racine. (risque, chemins). Ces endpoints ne dérivent PAS des ressources métier,
+# donc l'expansion CRUD ne les trouve jamais : d'où ce catalogue dédié.
+_WELLKNOWN_SHADOW_PATHS = (
+    ('high', (
+        '/debug', '/debug/config', '/debug/vars', '/_debug', '/config', '/config.json',
+        '/actuator', '/actuator/env', '/actuator/health', '/actuator/beans',
+        '/actuator/heapdump', '/actuator/mappings', '/actuator/configprops',
+        '/internal', '/internal/metadata', '/.env', '/.env.bak',
+        '/.git/config', '/.git/HEAD', '/.svn/entries', '/backup', '/backup.zip',
+        '/dump', '/db.sql', '/phpinfo.php', '/server-status', '/console',
+    )),
+    ('medium', (
+        '/health', '/healthz', '/status', '/metrics', '/info', '/version',
+        '/swagger.json', '/swagger-ui', '/swagger-ui.html', '/openapi.json',
+        '/api-docs', '/v2/api-docs', '/v3/api-docs', '/redoc', '/.well-known/security.txt',
+    )),
+)
+
+
+def _wellknown_shadow_candidates() -> List['CandidateRoute']:
+    """Candidats de découverte de contenu à la racine (déterministe, sans LLM)."""
+    out: List[CandidateRoute] = []
+    for risk, paths in _WELLKNOWN_SHADOW_PATHS:
+        for p in paths:
+            out.append(CandidateRoute('GET', p, f"chemin shadow bien connu ({p})",
+                                      "offline", risk))
+    return out
+
 
 @dataclass
 class CandidateRoute:
@@ -55,15 +86,20 @@ class CandidateRoute:
                 'status': self.status, 'exists': self.exists}
 
 
-def extrapolate_routes(model, client=None, max_candidates: int = 40) -> List[CandidateRoute]:
+def extrapolate_routes(model, client=None, max_candidates: int = 80) -> List[CandidateRoute]:
     """Propose des routes plausibles absentes du HAR. LLM en priorité, sinon
-    heuristique structurelle. Dédupliqué contre les routes déjà observées."""
+    heuristique structurelle. Le dictionnaire de chemins shadow bien connus est
+    TOUJOURS ajouté (déterministe), quel que soit le mode. Dédupliqué contre les
+    routes déjà observées."""
     observed = {(r.method, r.path_template) for r in model.routes.values()}
     candidates: List[CandidateRoute] = []
     if client is not None:
         candidates = _extrapolate_llm(model, client) or []
     if not candidates:
         candidates = _extrapolate_offline(model)
+
+    # Toujours joindre le catalogue shadow racine (en tête pour survivre au cap).
+    candidates = _wellknown_shadow_candidates() + candidates
 
     # Dédup contre l'observé et entre candidats.
     seen = set(observed)
