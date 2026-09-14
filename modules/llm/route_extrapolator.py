@@ -117,22 +117,13 @@ def _extrapolate_offline(model) -> List[CandidateRoute]:
 
 
 def _extrapolate_llm(model, client) -> Optional[List[CandidateRoute]]:
+    from .prompts import get_prompt
     observed = sorted({r.template for r in model.routes.values()})
     resources = sorted({r.resource for r in model.routes.values()})
-    prompt = (
-        "You are mapping a REST API from partial traffic. Given the OBSERVED routes, "
-        "propose likely-existing but UNOBSERVED routes an attacker should probe "
-        "(hidden/undocumented endpoints, missing CRUD verbs, admin/debug/export "
-        "variants) based on naming conventions and the business domain.\n"
-        f"Resources: {resources}\n"
-        f"Observed routes:\n" + "\n".join(f"  {t}" for t in observed) + "\n"
-        'Return a JSON list of {"method": str, "path": str (concrete path, use '
-        '{id} for identifiers), "why": str, "risk": "low|medium|high"}. '
-        "Do not repeat observed routes. Max 25."
-    )
+    system, user = get_prompt('route_extrapolate').render(
+        resources=resources, observed="\n".join(f"  {t}" for t in observed))
     try:
-        resp = client.complete(
-            prompt, system="You are a web pentester. Answer only with the JSON list.")
+        resp = client.complete(user, system=system)
         data = _extract_json(getattr(resp, 'content', None))
     except Exception as e:
         logger.warning("extrapolate_llm_failed", error=str(e))

@@ -292,14 +292,13 @@ class APIModel:
         """L'IA nomme l'entité métier et confirme la sensibilité. Repli : no-op
         (le déterministe fait déjà foi)."""
         from ..llm.adaptive_idor import _extract_json
+        from ..llm.prompts import get_prompt
         summary = [{'template': r.template, 'resource': r.resource, 'crud': r.crud,
                     'resp_keys': r.resp_keys[:12]} for r in self.routes.values()]
-        prompt = ("Given these API routes, return JSON mapping each 'template' to "
-                  "{\"entity\": business entity name, \"sensitive\": bool}. Routes:\n"
-                  + json.dumps(summary)[:4000])
+        system, user = get_prompt('api_model_enrich').render(
+            routes=json.dumps(summary)[:4000])
         try:
-            resp = client.complete(
-                prompt, system="You are a security engineer. Answer only with JSON.")
+            resp = client.complete(user, system=system)
             data = _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("api_model_enrich_llm_failed", error=str(e))

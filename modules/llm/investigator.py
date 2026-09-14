@@ -154,22 +154,13 @@ class MassAssignmentInvestigator:
     def _plan_llm(self, target: Dict, base_body: Dict) -> Optional[ConfirmationPlan]:
         """L'IA choisit l'oracle, la clé d'identité, et l'attribut stocké prouvant
         l'effet (avec mapping sémantique injected→stored)."""
-        prompt = (
-            "You are confirming a mass-assignment vulnerability by a second request.\n"
-            f"Write endpoint: {target.get('method', 'POST')} {target.get('url')}\n"
-            f"Write body keys: {list(base_body)}\n"
-            f"Candidate GET oracle endpoints (which one reflects stored state?):\n"
-            + "\n".join(f"  - {u}" for u in self.oracle_candidates) + "\n"
-            "Return JSON: {\"oracle_url\": str, \"identity_field\": str (a write-body key "
-            "echoed back by the oracle), \"record_path\": str|null (json key holding the "
-            "list of records, null if the oracle returns a bare list), \"effect_field\": "
-            "str|null (the STORED attribute that proves the injection took effect, e.g. an "
-            "injected 'is_admin' may be stored as 'admin'; null to check the injected field "
-            "verbatim)}."
-        )
+        from .prompts import get_prompt
+        system, user = get_prompt('investigator_plan').render(
+            method=target.get('method', 'POST'), url=target.get('url'),
+            body_keys=list(base_body),
+            oracles="\n".join(f"  - {u}" for u in self.oracle_candidates))
         try:
-            resp = self.client.complete(
-                prompt, system="You are a security engineer. Answer only with the requested JSON.")
+            resp = self.client.complete(user, system=system)
             data = _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("investigator_plan_llm_failed", error=str(e))

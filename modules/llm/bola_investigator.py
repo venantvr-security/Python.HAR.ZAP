@@ -215,17 +215,11 @@ class BolaInvestigator:
         return False, "no ownership evidence", "deterministic"
 
     def _adjudicate_llm(self, body: str, caller_id, other_id) -> Optional[bool]:
-        prompt = (
-            "Two different authenticated users received the SAME object body from an "
-            "object-by-id endpoint. Decide if this proves a broken object-level "
-            "authorization (one user reading another's private object) rather than a "
-            "shared/public resource.\n"
-            f"Caller A id: {caller_id!r}, Caller B id: {other_id!r}\n"
-            f"Object body: {body[:600]!r}\n"
-            'Return JSON {"bola": bool, "reason": str}.')
+        from .prompts import get_prompt
+        system, user = get_prompt('bola_adjudicate').render(
+            caller_id=repr(caller_id), other_id=repr(other_id), body=repr(body[:600]))
         try:
-            resp = self.client.complete(
-                prompt, system="You are a security engineer. Answer only with JSON.")
+            resp = self.client.complete(user, system=system)
             data = _extract_json(getattr(resp, 'content', None))
         except Exception as e:
             logger.warning("bola_llm_failed", error=str(e))
