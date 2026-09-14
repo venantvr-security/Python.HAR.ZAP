@@ -147,3 +147,35 @@ class TestCallerSpecificEndpoint:
              Session("name2", {"Authorization": "N2"}, "name2")],
             ownership_field="owner")
         assert f == []
+
+
+class TestMixDecision:
+    """La décision mixte tranche le cas public-vs-BOLA sur une ressource lisible
+    par tous (aucun refus)."""
+
+    _BODY = json.dumps({"id": 7, "author": "alice", "public": True})
+
+    class _AI:
+        def __init__(self, decision): self.decision = decision
+
+        class _R:
+            def __init__(self, c): self.content = c
+
+        def complete(self, prompt, system=None):
+            return self._R(json.dumps({"decision": self.decision, "reason": "x"}))
+
+    def _probe(self, client):
+        srv = lambda m, u, headers=None: {"status": 200, "body": self._BODY}  # noqa: E731
+        return BolaInvestigator(srv, client=client).probe(
+            ["u"], [Session("bob", {"Authorization": "B"}, "bob")], ownership_field="author")
+
+    def test_ai_public_drops_false_positive(self):
+        assert self._probe(self._AI("false_positive")) == []
+
+    def test_ai_real_promotes_to_confirmed(self):
+        f = self._probe(self._AI("real"))
+        assert f and f[0].verdict.status == "confirmed" and f[0].source == "llm"
+
+    def test_offline_stays_suspected(self):
+        f = self._probe(None)
+        assert f and f[0].verdict.status == "suspected"

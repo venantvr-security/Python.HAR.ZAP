@@ -46,3 +46,37 @@ class TestEngineUnification:
         from modules.active_probes import ProbeFinding
         assert ProbeFinding("API7", "Critical", "t", "u").verdict.status == CONFIRMED
         assert ProbeFinding("API7", "High", "t", "u", source="llm").verdict.status == SUSPECTED
+
+
+class TestMixAdjudicate:
+    """Décision mixte : déterministe souverain, IA seulement sur SUSPECTED."""
+
+    class _AI:
+        def __init__(self, decision): self.decision = decision
+
+        class _R:
+            def __init__(self, c): self.content = c
+
+        def complete(self, prompt, system=None):
+            import json as _j
+            return self._R(_j.dumps({"decision": self.decision, "reason": "x"}))
+
+    def test_confirmed_untouched_by_ai(self):
+        from modules.llm.investigation import mix_adjudicate
+        v = mix_adjudicate(Verdict(CONFIRMED, "proof"), {}, self._AI("false_positive"))
+        assert v.status == CONFIRMED and v.source == "deterministic"
+
+    def test_refuted_untouched_by_ai(self):
+        from modules.llm.investigation import mix_adjudicate
+        v = mix_adjudicate(Verdict(REFUTED, "disproof"), {}, self._AI("real"))
+        assert v.status == REFUTED
+
+    def test_suspected_promoted_or_dropped(self):
+        from modules.llm.investigation import mix_adjudicate
+        assert mix_adjudicate(Verdict(SUSPECTED), {}, self._AI("real")).status == CONFIRMED
+        assert mix_adjudicate(Verdict(SUSPECTED), {}, self._AI("false_positive")).status == REFUTED
+        assert mix_adjudicate(Verdict(SUSPECTED), {}, self._AI("uncertain")).status == SUSPECTED
+
+    def test_offline_keeps_suspected(self):
+        from modules.llm.investigation import mix_adjudicate
+        assert mix_adjudicate(Verdict(SUSPECTED), {}, None).status == SUSPECTED
