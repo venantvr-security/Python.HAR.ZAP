@@ -147,6 +147,8 @@ Examples:
     mtx_parser.add_argument('--role', action='append', required=True, metavar='NAME=HAR',
                             help='Role HAR in ASCENDING privilege order, repeatable '
                                  '(e.g. --role user=user.har --role admin=admin.har)')
+    mtx_parser.add_argument('--bola', action='store_true',
+                            help='Also run multi-session BOLA (object-level) on observed objects')
     mtx_parser.add_argument('--anon', action='store_true',
                             help='Prepend an anonymous (no-auth) role')
     mtx_parser.add_argument('-o', '--output', default='./output', help='Output directory')
@@ -199,6 +201,8 @@ Examples:
                              help='Compose exploit chains from the findings (LLM with --ai, else heuristic)')
     diag_parser.add_argument('--business-flow', action='store_true',
                              help='Active business-flow abuse (API6): state-skip, value manipulation, replay')
+    diag_parser.add_argument('--investigate', action='store_true',
+                             help='Second-order investigations: extrapolate shadow routes (API9) and forge/replay JWT bypass (API2), verdicts proven not asserted')
     diag_parser.add_argument('--third-party', action='store_true',
                              help='Analyze third-party API consumption (API10): cleartext, redirects, deps')
     diag_parser.add_argument('--ai-record', metavar='FILE',
@@ -559,6 +563,73 @@ def run_websocket(args):
     return 0
 
 
+def _matrix_role_identity(headers):
+    """Identité (username) d'un rôle = claim 'sub' de son JWT, sinon None (anon).
+    Indispensable au BOLA : sans elle, on ne peut pas comparer le propriétaire
+    d'un objet a l'appelant."""
+    import base64 as _b64, json as _j, re as _re
+    val = ''
+    for k, v in (headers or {}).items():
+        if str(k).lower() == 'authorization':
+            val = v
+            break
+    m = _re.search(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*', val or '')
+    if not m:
+        return None
+    try:
+        payload = _j.loads(_b64.urlsafe_b64decode(m.group(0).split('.')[1] + '=='))
+        return str(payload.get('sub') or payload.get('username')
+                   or payload.get('user') or '') or None
+    except Exception:
+        return None
+
+
+def _run_matrix_bola(role_hars, roles, execute):
+    """BOLA multi-sessions : chaque objet observe (route /{id}) est relu par
+    chaque role ; l'identite vient du sub JWT ; le champ de propriete vient du
+    modele semantique. Regroupe par ressource."""
+    from urllib.parse import urlparse
+    from modules.semantic.api_model import APIModel, route_is_sensitive
+    from modules.llm.bola_investigator import BolaInvestigator, Session
+    union = {'log': {'entries': []}}
+    # GET observés par ressource, avec la profondeur de leur chemin.
+    gets_by_res = {}
+    for _name, har in role_hars:
+        for e in (har.get('log', {}).get('entries', []) or []):
+            union['log']['entries'].append(e)
+            req = e.get('request', {})
+            url = req.get('url', '')
+            if not url or (req.get('method', 'GET').upper() != 'GET'):
+                continue
+            path = urlparse(url).path
+            gets_by_res.setdefault(APIModel._resource_of(path), []).append((path.count('/'), path, url))
+    # Un objet = un GET plus profond que la collection (heuristique robuste aux
+    # ids non numériques que le templating ne reconnaît pas), non sensible.
+    obj_by_res = {}
+    for res, gets in gets_by_res.items():
+        min_depth = min(d for d, _p, _u in gets)
+        for depth, path, url in gets:
+            if depth > min_depth and not route_is_sensitive(path):
+                obj_by_res.setdefault(res, set()).add(url)
+    model = APIModel.from_har(union)
+    sessions = [Session(r.name, r.headers, _matrix_role_identity(r.headers)) for r in roles]
+
+    def send(method, url, headers=None):
+        return execute(url, method, headers or {})
+
+    inv = BolaInvestigator(send)
+    out = []
+    for res, urls in obj_by_res.items():
+        of = model.ownership_field_for(res)
+        if not of:
+            continue
+        for f in inv.probe(sorted(urls), sessions, ownership_field=of):
+            out.append(f.flat())
+    if out:
+        print(f"[MATRIX-BOLA] {len(out)} object-level finding(s)")
+    return out
+
+
 def run_matrix_cmd(args):
     """Construit la matrice d'accès multi-rôles et cartographie BOLA/BFLA."""
     from modules.access_matrix import (Role, build_endpoints, run_matrix, render_matrix_cli)
@@ -619,8 +690,10 @@ def run_matrix_cmd(args):
     matrix = run_matrix(roles, endpoints, execute, max_workers=getattr(args, "workers", 8))
     print(render_matrix_cli(matrix))
 
+    # BOLA multi-sessions optionnel (objet d'autrui), en plus des violations verticales.
+    extra = _run_matrix_bola(role_hars, roles, execute) if getattr(args, 'bola', False) else []
     # Sortie findings-first des violations + rapports.
-    findings = build_findings(matrix.violation_findings())
+    findings = build_findings(matrix.violation_findings() + extra)
     if findings:
         print(render_cli(findings))
     report = {'target': ','.join(r.name for r in roles), 'summary': matrix.summary(),
@@ -957,6 +1030,38 @@ def _run_business_flow(har_data, config, args, zap_client):
     flat = [f.flat() for f in findings]
     print(f"[BUSINESS-FLOW] {len(flows)} flow(s), {len(flat)} abuse(s) accepted")
     return flat
+
+
+def _run_investigations(har_data, config, args, zap_client):
+    """Modèle sémantique partagé + extrapolation de routes (API9, endpoints
+    cachés) + confirmateur d'auth (API2, forge alg=none/sans signature + rejeu).
+
+    L'exécuteur envoie EXACTEMENT les en-têtes demandes (aucune injection d'auth
+    automatique) : le forge-auth a besoin d'une baseline SANS jeton, l'auth
+    explicite du HAR n'est passée qu'au sondage des routes."""
+    from modules.investigations import run_investigations
+    from modules.idor_detector import IDORDetector
+    from modules.llm.adaptive_idor import client_from_config
+    auth = IDORDetector.extract_auth_tokens(har_data) or {}
+    client = client_from_config(config) if getattr(args, 'ai', False) else None
+
+    def send(method, url, headers=None, json_body=None):
+        hdrs = headers or {}          # jamais d'injection d'auth implicite
+        if zap_client is not None:
+            r = zap_client.request(method, url, headers=hdrs, json_data=json_body,
+                                   follow_redirects=False)
+            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
+        import requests
+        try:
+            r = requests.request(method, url, headers=hdrs, json=json_body,
+                                 timeout=10, verify=False, allow_redirects=False)
+            return {'status': r.status_code, 'body': r.text[:2000]}
+        except Exception:
+            return {'status': 0, 'body': ''}
+
+    out = run_investigations(har_data, send, args.target, headers=auth, client=client)
+    print(f"[INVESTIGATE] {len(out)} finding(s) (shadow routes + auth forge)")
+    return out
 
 
 def _run_shadow_endpoints(har_data, args, config):
@@ -1367,6 +1472,10 @@ def run_diagnose(args):
         # Active business-flow abuse (API6): state-skip / value manipulation / replay.
         if getattr(args, 'business_flow', False):
             all_findings.extend(_run_business_flow(har_data, config, args, zap_client))
+
+        # Second-order investigations (shadow routes API9 + auth forge API2).
+        if getattr(args, 'investigate', False):
+            all_findings.extend(_run_investigations(har_data, config, args, zap_client))
 
         # Third-party API consumption (API10) — static HAR analysis.
         if getattr(args, 'third_party', False):

@@ -226,10 +226,10 @@ class MassAssignmentInvestigator:
             ident = identity_by_field.get(fld)
             if ident is None:
                 return False
-            rec = self._read_back(plan, ident)
+            attr = plan.effect_field or fld
+            rec = self._read_back(plan, ident, attr)
             if rec is None:
                 return False
-            attr = plan.effect_field or fld
             got = rec.get(attr)
             # Effet confirmé si l'attribut reflète l'injection (véracité ou égalité).
             confirmed = bool(got) if got is not None else False
@@ -243,17 +243,41 @@ class MassAssignmentInvestigator:
 
         return execute_fn, verify_fn, plan
 
-    def _read_back(self, plan: ConfirmationPlan, ident: str) -> Optional[Dict]:
-        """Relit l'oracle et retrouve l'enregistrement par sa clé d'identité."""
+    def _read_back(self, plan: ConfirmationPlan, ident: str,
+                   attr: Optional[str] = None) -> Optional[Dict]:
+        """Retrouve l'enregistrement de `ident` en essayant PLUSIEURS oracles.
+
+        Un oracle unique peut ne pas exposer le champ injecté (ex. une liste qui
+        montre `username` mais pas `admin`) → faux négatif. On essaie donc
+        l'oracle du plan PUIS les autres candidats du modèle, et on retient de
+        préférence l'enregistrement qui expose `attr` (la preuve de l'effet)."""
+        oracles = [plan.oracle_url] + [u for u in self.oracle_candidates
+                                       if u and u != plan.oracle_url]
+        fallback: Optional[Dict] = None
+        for oracle in oracles:
+            if not oracle:
+                continue
+            record_path = plan.record_path if oracle == plan.oracle_url \
+                else self._discover_record_path(oracle)
+            rec = self._find_record(oracle, plan.oracle_headers, record_path,
+                                    plan.identity_field, ident)
+            if rec is None:
+                continue
+            if attr is None or attr in rec:
+                return rec           # oracle qui expose l'attribut d'effet
+            fallback = fallback or rec
+        return fallback
+
+    def _find_record(self, oracle_url, headers, record_path, identity_field, ident):
         try:
-            resp = self.send('GET', plan.oracle_url, headers=plan.oracle_headers)
+            resp = self.send('GET', oracle_url, headers=headers)
             data = json.loads(resp.get('body', '') or 'null')
         except Exception:
             return None
-        records = data.get(plan.record_path) if (plan.record_path and isinstance(data, dict)) else data
+        records = data.get(record_path) if (record_path and isinstance(data, dict)) else data
         if not isinstance(records, list):
             return None
         for rec in records:
-            if isinstance(rec, dict) and str(rec.get(plan.identity_field)) == str(ident):
+            if isinstance(rec, dict) and str(rec.get(identity_field)) == str(ident):
                 return rec
         return None

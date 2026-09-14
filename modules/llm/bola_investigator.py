@@ -128,13 +128,27 @@ class BolaInvestigator:
                 if not protected and source == "deterministic":
                     source = "suspected"
                     reason += " — but no access-control evidence (object readable by all; may be public)"
+                # Propriétaire reporté = celui vu dans la réponse de l'attaquant.
+                reported = (self._body_owner(info['body'], ownership_field)
+                            if ownership_field else owner) or owner
                 findings.append(BolaFinding(
-                    object_url=url, attacker=s.name, owner=owner, status=st,
+                    object_url=url, attacker=s.name, owner=reported, status=st,
                     confirmed=True, reason=reason, source=source,
                     severity='Critical' if s.identity in (None, '') else 'High'))
                 logger.info("bola_finding", url=url, attacker=s.name,
                             owner=owner, source=source, protected=protected)
         return findings
+
+    @staticmethod
+    def _body_owner(body: str, ownership_field: str) -> Optional[str]:
+        """Valeur du champ de propriété dans CE corps de réponse précis."""
+        try:
+            data = json.loads(body or 'null')
+        except (ValueError, TypeError):
+            return None
+        if isinstance(data, dict) and data.get(ownership_field) is not None:
+            return str(data[ownership_field])
+        return None
 
     def _owner_of(self, reads: Dict, ownership_field: Optional[str]) -> Optional[str]:
         """Propriétaire de l'objet = valeur du champ de propriété dans une réponse
@@ -155,11 +169,19 @@ class BolaInvestigator:
                     reads: Dict, ownership_field: Optional[str]):
         """(confirmé, raison, source). Déterministe via le champ de propriété ;
         IA en repli pour le cas opaque."""
-        # Cas net : le propriétaire est connu et ce n'est pas cette session.
-        if owner is not None and str(s.identity) != owner:
-            return True, f"object owner '{owner}' != caller '{s.identity}'", "deterministic"
-        if owner is not None:
-            return False, "caller is the owner", "deterministic"
+        # Propriétaire tel que vu dans la RÉPONSE de CETTE session (pas un owner
+        # global). Indispensable pour les API qui renvoient un objet différent
+        # selon l'appelant (`/posts/{id}` qui renvoie « le tien ») : dans ce cas
+        # l'attaquant voit owner==lui-même → pas de percée, pas de faux positif.
+        if ownership_field is not None:
+            body_owner = self._body_owner(info['body'], ownership_field)
+            if body_owner is not None and str(s.identity) != body_owner:
+                return True, (f"received object owned by '{body_owner}' "
+                              f"(caller '{s.identity}')"), "deterministic"
+            if body_owner is not None:
+                return False, "caller is the owner", "deterministic"
+            # 2xx mais pas de champ de propriété dans CETTE réponse → indécis,
+            # on retombe sur la comparaison inter-sessions ci-dessous.
 
         # Pas de champ de propriété : compare aux autres sessions. Si une session
         # d'identité différente a reçu le MÊME corps non trivial, c'est suspect.

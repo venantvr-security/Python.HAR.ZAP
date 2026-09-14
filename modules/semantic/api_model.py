@@ -73,6 +73,11 @@ def route_is_sensitive(path: str) -> bool:
     return False
 
 
+def resource_of_path(path: str) -> str:
+    """Nom de ressource déduit d'un chemin (segment métier, hors version/param)."""
+    return APIModel._resource_of(path)
+
+
 def _auth_present(headers: List[Dict]) -> bool:
     for h in headers or []:
         n = (h.get('name') or '').lower()
