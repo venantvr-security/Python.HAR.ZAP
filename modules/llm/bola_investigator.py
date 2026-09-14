@@ -27,6 +27,7 @@ from typing import Callable, Dict, List, Optional
 
 from ..utils import get_logger
 from .adaptive_idor import _extract_json
+from .investigation import mix_adjudicate, Verdict, SUSPECTED, REFUTED, CONFIRMED
 
 logger = get_logger("llm.bola_investigator")
 
@@ -125,18 +126,32 @@ class BolaInvestigator:
                                                            ownership_field)
                 if not verdict:
                     continue
-                if not protected and source == "deterministic":
-                    source = "suspected"
-                    reason += " — but no access-control evidence (object readable by all; may be public)"
-                # Propriétaire reporté = celui vu dans la réponse de l'attaquant.
                 reported = (self._body_owner(info['body'], ownership_field)
                             if ownership_field else owner) or owner
+                if not protected and source == "deterministic":
+                    # Milieu ambigu : lisible par tous ET champ owner ≠ appelant.
+                    # Décision MIXTE — l'IA tranche public vs accès cassé ; sans
+                    # IA, ça reste « suspecté » (jamais affirmé).
+                    source = "suspected"
+                    reason += " — no access-control evidence (readable by all; may be public)"
+                    v = mix_adjudicate(
+                        Verdict(SUSPECTED, reason, 0.5, "deterministic"),
+                        {'kind': 'BOLA (object-level authorization)', 'url': url,
+                         'reason': 'object readable by all callers but carries an '
+                                   f"owner field '{reported}' != caller '{s.identity}'",
+                         'evidence': info['body']},
+                        self.client)
+                    if v.status == REFUTED:
+                        logger.info("bola_refuted_by_ai", url=url, attacker=s.name)
+                        continue                      # faux positif écarté par l'IA
+                    source = "llm" if v.source == "llm" and v.status == CONFIRMED else "suspected"
+                    reason = v.reason
                 findings.append(BolaFinding(
                     object_url=url, attacker=s.name, owner=reported, status=st,
                     confirmed=True, reason=reason, source=source,
                     severity='Critical' if s.identity in (None, '') else 'High'))
                 logger.info("bola_finding", url=url, attacker=s.name,
-                            owner=owner, source=source, protected=protected)
+                            owner=reported, source=source, protected=protected)
         return findings
 
     @staticmethod

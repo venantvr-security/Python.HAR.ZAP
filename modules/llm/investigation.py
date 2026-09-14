@@ -84,3 +84,44 @@ def summarize(verdicts: List[Verdict]) -> Dict[str, int]:
     for v in verdicts:
         out[v.status] = out.get(v.status, 0) + 1
     return out
+
+
+# --- Décision mixte déterministe + IA -------------------------------------
+# Le déterministe est SOUVERAIN quand il tranche : CONFIRMED (preuve directe) et
+# REFUTED (contre-preuve) ne sont JAMAIS révisés par l'IA — la preuve prime sur
+# l'opinion. L'IA n'arbitre QUE le SUSPECTED, le milieu ambigu que le
+# déterministe n'a pu ni prouver ni infirmer (typiquement : « objet lisible par
+# tous ET portant un champ owner — ressource publique ou accès cassé ? »).
+# Sans client, le SUSPECTED reste SUSPECTED (repli honnête, jamais affirmé).
+
+def mix_adjudicate(verdict: "Verdict", context: Dict, client=None) -> "Verdict":
+    """Applique l'IA au seul verdict SUSPECTED ; renvoie un verdict révisé."""
+    if verdict.status != SUSPECTED or client is None:
+        return verdict
+    from .adaptive_idor import _extract_json
+    prompt = (
+        "A deterministic security check could not decide (SUSPECTED). Adjudicate: is "
+        "this a REAL finding or a FALSE POSITIVE? Judge only from the evidence; when "
+        "genuinely unclear, say uncertain.\n"
+        f"Finding type: {context.get('kind', '?')}\n"
+        f"URL: {context.get('url', '')}\n"
+        f"Why undecided: {context.get('reason', '')}\n"
+        f"Evidence: {str(context.get('evidence', ''))[:700]}\n"
+        'Return JSON {"decision": "real"|"false_positive"|"uncertain", '
+        '"reason": str, "confidence": number(0-1)}.')
+    try:
+        resp = client.complete(
+            prompt, system="You are a senior security engineer. Answer only with JSON.")
+        data = _extract_json(getattr(resp, 'content', None))
+    except Exception:
+        return verdict
+    if not isinstance(data, dict) or 'decision' not in data:
+        return verdict
+    decision = str(data.get('decision', '')).lower()
+    reason = "AI-adjudicated: " + str(data.get('reason', ''))
+    conf = float(data.get('confidence', 0.7))
+    if decision == 'real':
+        return Verdict(CONFIRMED, reason, conf, "llm", verdict.evidence)
+    if decision == 'false_positive':
+        return Verdict(REFUTED, reason, conf, "llm", verdict.evidence)
+    return Verdict(SUSPECTED, reason, conf, "llm", verdict.evidence)

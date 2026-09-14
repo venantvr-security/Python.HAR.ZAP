@@ -147,6 +147,8 @@ Examples:
     mtx_parser.add_argument('--role', action='append', required=True, metavar='NAME=HAR',
                             help='Role HAR in ASCENDING privilege order, repeatable '
                                  '(e.g. --role user=user.har --role admin=admin.har)')
+    mtx_parser.add_argument('--ai', action='store_true',
+                            help='Use the embedded LLM to adjudicate ambiguous (SUSPECTED) findings')
     mtx_parser.add_argument('--bola', action='store_true',
                             help='Also run multi-session BOLA (object-level) on observed objects')
     mtx_parser.add_argument('--anon', action='store_true',
@@ -584,7 +586,7 @@ def _matrix_role_identity(headers):
         return None
 
 
-def _run_matrix_bola(role_hars, roles, execute):
+def _run_matrix_bola(role_hars, roles, execute, client=None):
     """BOLA multi-sessions : chaque objet observe (route /{id}) est relu par
     chaque role ; l'identite vient du sub JWT ; le champ de propriete vient du
     modele semantique. Regroupe par ressource."""
@@ -617,7 +619,7 @@ def _run_matrix_bola(role_hars, roles, execute):
     def send(method, url, headers=None):
         return execute(url, method, headers or {})
 
-    inv = BolaInvestigator(send)
+    inv = BolaInvestigator(send, client=client)
     out = []
     for res, urls in obj_by_res.items():
         of = model.ownership_field_for(res)
@@ -691,7 +693,12 @@ def run_matrix_cmd(args):
     print(render_matrix_cli(matrix))
 
     # BOLA multi-sessions optionnel (objet d'autrui), en plus des violations verticales.
-    extra = _run_matrix_bola(role_hars, roles, execute) if getattr(args, 'bola', False) else []
+    _bola_client = None
+    if getattr(args, 'bola', False) and getattr(args, 'ai', False):
+        from modules.llm.adaptive_idor import client_from_config
+        _bola_client = client_from_config(load_config(getattr(args, 'config', None)))
+    extra = _run_matrix_bola(role_hars, roles, execute, client=_bola_client) \
+        if getattr(args, 'bola', False) else []
     # Sortie findings-first des violations + rapports.
     findings = build_findings(matrix.violation_findings() + extra)
     if findings:
