@@ -36,11 +36,17 @@ _NONRESOURCE = {'api', 'rest', 'v1', 'v2', 'v3', 'public', 'internal'}
 # Un segment templaté ({id}) marque un accès à un objet précis.
 _PARAM_RE = re.compile(r'^\{.+\}$')
 
-# Sensibilité par mot-clé de chemin : ces routes exposent typiquement un état
-# privilégié/interne et ne devraient jamais être atteignables librement.
-_SENSITIVE_PATH = re.compile(
-    r'(_?debug|dump|actuator|admin|config|internal|backup|export|secret|'
-    r'credential|token|password|\.git|swagger|metrics|env)', re.I)
+# Sensibilité : un SEGMENT de chemin ENTIER égal à l'un de ces mots (pas une
+# sous-chaîne). Le matching en sous-chaîne signalait `/oauth/token`,
+# `/environments`, voire `/greenvalley` — faux positifs. On matche donc segment
+# par segment. Les mots trop ambigus (token, password, export : souvent des
+# endpoints publics comme /oauth/token ou /reset-password) sont exclus ; on garde
+# les marqueurs sans équivoque d'un état privilégié/interne.
+_SENSITIVE_SEGMENTS = frozenset((
+    '_debug', 'debug', 'dump', 'actuator', 'admin', 'config', 'configuration',
+    'internal', 'backup', 'secret', 'secrets', 'credential', 'credentials',
+    'swagger', 'metrics', 'env', 'phpinfo', '.git', '.env',
+))
 # Champs dont la présence en réponse trahit une exposition de données sensibles.
 _SENSITIVE_FIELDS = ('password', 'passwd', 'secret', 'token', 'ssn', 'credit',
                      'api_key', 'apikey', 'private_key')
@@ -58,8 +64,13 @@ _OWNERSHIP_KEYS = ('owner', 'user_id', 'userid', 'user', 'username', 'author',
 
 
 def route_is_sensitive(path: str) -> bool:
-    """Heuristique déterministe de sensibilité d'une route, par son chemin."""
-    return bool(_SENSITIVE_PATH.search(path or ''))
+    """Sensible si un SEGMENT ENTIER du chemin est un marqueur privilégié/interne.
+    Matching par segment (pas sous-chaîne) pour éviter les faux positifs du type
+    `/oauth/token`, `/environments`, `/greenvalley`, `/tokenizer`."""
+    for seg in (path or '').split('/'):
+        if seg.lower() in _SENSITIVE_SEGMENTS:
+            return True
+    return False
 
 
 def _auth_present(headers: List[Dict]) -> bool:

