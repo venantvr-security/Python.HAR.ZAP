@@ -91,6 +91,22 @@ class TestRender:
         assert '<title>' in h and 'API1:2023' in h and 'curl -i -s' in h
         assert 'BOLA' in h and 'PATCH' in h
 
+    def test_html_without_narrative_omits_section(self):
+        h = render_html(build_findings(FLAT, _Res()), {'target': 'x'})
+        assert 'Narratif' not in h                       # rien à raconter -> section absente
+
+    def test_html_narrative_renders_chains_escalations_recos(self):
+        h = render_html(
+            build_findings(FLAT, _Res()), {'target': 'x'},
+            chains=[{'title': 'SSRF → metadata', 'steps': ['fetch internal', 'read token'],
+                     'rationale': 'pivot', 'confidence': 0.7, 'source': 'deterministic'}],
+            escalations=[{'name': 'Secret exposed via /debug/config: secret_key'}],
+            recommendations=[{'trigger': 'SSRF', 'action': 'Pivoter vers interne'}])
+        assert 'Narratif' in h
+        assert 'SSRF → metadata' in h and 'read token' in h      # chaîne + étapes
+        assert 'Secret exposed via /debug/config' in h          # escalade
+        assert 'Pivoter vers interne' in h                      # reco
+
 
 class TestVerdictStatus:
     def test_status_propagates_from_flat(self):

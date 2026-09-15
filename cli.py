@@ -1171,7 +1171,7 @@ _ZAP_PAYLOAD_SOURCES = {
 }
 
 
-def _enrich_zap_payloads(all_findings, args, report):
+def _enrich_zap_payloads(all_findings, config, args, report):
     """Réinjecte les charges confirmées (SSRF, path traversal, SSTI, XSS, open
     redirect) dans le PatternStore -> export wordlists ZAP. Pendant « sondes
     actives » de l'enrichissement adaptatif (IDOR/mass-assignment/hidden-params)."""
@@ -1780,7 +1780,7 @@ def run_diagnose(args):
 
         # Enrichissement ZAP : charges prouvées (SSRF/traversal/SSTI/XSS/redirect)
         # -> wordlists de fuzzer, comme la campagne adaptative pour IDOR/mass-assign.
-        _enrich_zap_payloads(all_findings, args, report)
+        _enrich_zap_payloads(all_findings, config, args, report)
 
         # Third-party API consumption (API10) — static HAR analysis.
         if getattr(args, 'third_party', False):
@@ -1806,8 +1806,12 @@ def run_diagnose(args):
         print(render_cli(unified))
         if 'html' in args.format:
             html_path = Path(args.output) / 'diagnostic_report.html'
-            html_path.write_text(render_html(unified, {'target': args.target,
-                                                       'har_file': args.har_file}))
+            _fu = report.get('followups', {})
+            html_path.write_text(render_html(
+                unified, {'target': args.target, 'har_file': args.har_file},
+                chains=report.get('exploit_chains'),
+                recommendations=_fu.get('recommendations'),
+                escalations=_fu.get('escalations')))
             print(f"Findings-first report: {html_path}")
 
         # Honest coverage report (deterministic) — what was actually tested.
