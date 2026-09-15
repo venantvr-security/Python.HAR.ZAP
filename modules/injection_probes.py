@@ -199,7 +199,7 @@ def _sqli_boolean(execute_fn, method, mutate, label, adjudicator) -> Optional[In
     # baseline bénin + TRUE + FALSE ; TRUE proche baseline, FALSE nettement différent.
     ub, bb = mutate('hzbaseline_zzz')
     base = _get(execute_fn, ub, method, bb)
-    base_body, base_status = base.get('body', '') or '', int(base.get('status', 0))
+    base_body = base.get('body', '') or ''
     for tp, fp in zip(_SQL_BOOL_TRUE, _SQL_BOOL_FALSE):
         ut, bt = mutate(tp)
         rt = _get(execute_fn, ut, method, bt)
@@ -209,10 +209,14 @@ def _sqli_boolean(execute_fn, method, mutate, label, adjudicator) -> Optional[In
         if _SQL_ERRORS.search(tb) or _SQL_ERRORS.search(fb):
             continue                          # géré par error-based
         sim_tf = _similar(tb, fb)
-        sim_tbase = _similar(tb, base_body)
-        # TRUE ~ baseline (page normale) ET FALSE nettement divergent
-        strong = (sim_tbase > 0.95 and sim_tf < 0.9 and
-                  int(rt.get('status', 0)) == base_status)
+        # TRUE et FALSE divergent, ET l'UN des deux reproduit le baseline bénin
+        # (login-bypass : FALSE≈baseline refusé, TRUE ouvre ; recherche : FALSE≈
+        # baseline vide, TRUE ramène tout). L'ancre baseline écarte le FP « des
+        # valeurs différentes donnent des résultats différents ».
+        anchor = max(_similar(tb, base_body), _similar(fb, base_body))
+        strong = (sim_tf < 0.9 and anchor > 0.92 and
+                  200 <= int(rt.get('status', 0)) < 300 and
+                  200 <= int(rf.get('status', 0)) < 300)
         if strong:
             # Le booléen reste SUSPECTED (une appli légitime peut varier selon la
             # valeur) : source 'heuristic' (ou 'llm' si adjugé) -> jamais CONFIRMED.

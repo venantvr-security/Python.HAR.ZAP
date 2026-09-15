@@ -49,6 +49,8 @@ open redirect, reset prédictible, injection CSV).
 | Jeton de reset prédictible | `/auth/reset-request` → `/auth/reset-confirm` | `token = md5(username)[:8]` |
 | CORS permissif | tout endpoint | `Origin` reflété + `Allow-Credentials: true` |
 | Injection de formule CSV | `GET /export/subscribers.csv` | pseudo commençant par `=`/`+`/`-`/`@` |
+| SQLi (simulée) | `GET /articles/search?q=` | `q=%27` (erreur), `' OR '1'='1` (booléen), `SLEEP(5)` (time-based) |
+| NoSQLi (simulée) | `POST /articles/query` | `{"title":{"$ne":null}}` (opérateur), `{"$where":"sleep(5000)"}` (time-based) |
 
 ## Chaînes (rebonds)
 
