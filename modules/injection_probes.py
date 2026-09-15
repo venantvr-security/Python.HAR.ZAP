@@ -148,14 +148,14 @@ def _adjudicate(adjudicator, kind, url, payload, body, hint):
 # =============================================================================
 # SQL injection
 # =============================================================================
-def probe_sqli(execute_fn: Callable, targets: List[Dict],
-               adjudicator=None, time_budget: int = _TIME_BUDGET) -> List[InjectionFinding]:
+def probe_sqli(execute_fn: Callable, targets: List[Dict], adjudicator=None,
+               time_budget: int = _TIME_BUDGET, extra: Optional[List[str]] = None) -> List[InjectionFinding]:
     findings: List[InjectionFinding] = []
     budget = [time_budget]
     for t in targets:
         hit = None
         for label, key, method, mutate in _points(t):
-            hit = (_sqli_error(execute_fn, method, mutate, label)
+            hit = (_sqli_error(execute_fn, method, mutate, label, extra)
                    or _sqli_time(execute_fn, method, mutate, label, budget)
                    or _sqli_boolean(execute_fn, method, mutate, label, adjudicator))
             if hit:
@@ -164,8 +164,9 @@ def probe_sqli(execute_fn: Callable, targets: List[Dict],
     return findings
 
 
-def _sqli_error(execute_fn, method, mutate, label) -> Optional[InjectionFinding]:
-    for payload in _SQL_ERROR_PAYLOADS:
+def _sqli_error(execute_fn, method, mutate, label, extra=None) -> Optional[InjectionFinding]:
+    # charges déterministes + charges synthétisées par l'IA (Phase 3b), si fournies.
+    for payload in list(_SQL_ERROR_PAYLOADS) + list(extra or []):
         url, body = mutate(payload)
         r = _get(execute_fn, url, method, body)
         if _SQL_ERRORS.search(r.get('body', '') or ''):
@@ -320,11 +321,12 @@ def _nosqli_time(execute_fn, t, budget) -> Optional[InjectionFinding]:
 # =============================================================================
 def run_injection_probes(execute_fn: Callable, har_data: Dict,
                          targets: Optional[List[Dict]] = None,
-                         adjudicator=None) -> List[Dict]:
-    """Lance SQLi + NoSQLi et rend des findings à plat."""
+                         adjudicator=None, extra_sqli: Optional[List[str]] = None) -> List[Dict]:
+    """Lance SQLi + NoSQLi et rend des findings à plat. `extra_sqli` : charges
+    synthétisées par l'IA (Phase 3b), ajoutées aux charges déterministes."""
     targets = targets if targets is not None else injectable_targets(har_data)
     out: List[InjectionFinding] = []
-    out += probe_sqli(execute_fn, targets, adjudicator=adjudicator)
+    out += probe_sqli(execute_fn, targets, adjudicator=adjudicator, extra=extra_sqli)
     out += probe_nosqli(execute_fn, targets, adjudicator=adjudicator)
     flat = [f.flat() for f in out]
     logger.info("injection_probes_done", findings=len(flat))

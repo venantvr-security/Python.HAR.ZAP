@@ -1,0 +1,176 @@
+"""
+Synthèse de payloads par endpoint (Phase 3b) — l'IA propose des charges adaptées
+au stack de la cible ; le code les valide, les borne et les mémorise.
+
+Les sondes d'injection utilisent des listes de payloads FIXES. Contre une cible
+Node/Mongo, les charges MySQL sont du bruit ; contre PHP/MySQL, les opérateurs
+Mongo sont inutiles. Ici l'IA regarde une empreinte (Server/X-Powered-By, cookies
+de session, indices de SGBD) et PROPOSE des charges ciblées, en PLUS des charges
+déterministes (jamais à leur place).
+
+Discipline du projet :
+- l'IA PROPOSE, le code DISPOSE : chaque charge est validée (chaîne, longueur
+  bornée, dédup) et FILTRÉE des motifs destructifs (DROP/DELETE/TRUNCATE/rm…) —
+  on reste sur des charges de DÉTECTION (erreur/booléen/temps), jamais d'altération ;
+- « propose une fois » : les charges sont persistées par (domaine, classe) dans
+  patterns/synth/ et relues aux runs suivants — plus d'appel modèle ;
+- sans client LLM -> [] : les sondes gardent leurs charges déterministes.
+"""
+import json
+import os
+import re
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
+
+from ..utils import get_logger
+
+logger = get_logger("llm.payload_synth")
+
+# Motifs interdits : on ne synthétise que de la DÉTECTION, jamais de la destruction.
+_DESTRUCTIVE = re.compile(
+    r"\b(drop\s+table|drop\s+database|truncate|delete\s+from|update\s+.+\s+set|"
+    r"insert\s+into|shutdown|xp_cmdshell|rm\s+-rf|;\s*rm\b|mkfs|:\s*>\s*/|"
+    r"format\s+c:|dropdatabase|remove\s*\(|deleteone|deletemany)", re.I)
+
+_MAX_PAYLOADS = 12
+_MAX_LEN = 200
+
+# Empreintes -> familles probables (aide au prompt, non contraignant).
+_COOKIE_HINTS = {
+    'phpsessid': 'php', 'jsessionid': 'java', 'connect.sid': 'node/express',
+    'laravel_session': 'php/laravel', 'csrftoken': 'python/django',
+    'asp.net_sessionid': 'asp.net', '_rails': 'ruby/rails',
+}
+
+
+def fingerprint(har_data: Dict) -> Dict[str, str]:
+    """Devine le stack depuis les en-têtes de réponse et les cookies observés."""
+    server = powered = db = stack = ''
+    for e in (har_data or {}).get('log', {}).get('entries', []) or []:
+        for h in (e.get('response', {}) or {}).get('headers', []) or []:
+            n, v = h.get('name', '').lower(), h.get('value', '')
+            if n == 'server' and not server:
+                server = v
+            if n == 'x-powered-by' and not powered:
+                powered = v
+            if n == 'set-cookie':
+                for cookie, fam in _COOKIE_HINTS.items():
+                    if cookie in v.lower():
+                        stack = stack or fam
+    blob = f"{server} {powered} {stack}".lower()
+    if 'express' in blob or 'node' in blob:
+        db = 'mongodb (probable)'
+    elif 'php' in blob or 'laravel' in blob:
+        db = 'mysql (probable)'
+    elif 'django' in blob or 'python' in blob:
+        db = 'postgresql (probable)'
+    return {'server': server, 'x_powered_by': powered, 'stack': stack, 'db_guess': db}
+
+
+class SynthStore:
+    """Cache persistant des charges synthétisées (propose une fois)."""
+
+    def __init__(self, base_path: str = './patterns'):
+        self.path = os.path.join(base_path, 'synth')
+        self._cache: Dict[str, Dict[str, List[str]]] = {}
+        try:
+            os.makedirs(self.path, exist_ok=True)
+        except Exception:
+            pass
+
+    def _file(self, domain: str) -> str:
+        safe = re.sub(r'[^\w.-]', '_', domain or 'unknown')
+        return os.path.join(self.path, f'{safe}.json')
+
+    def get(self, domain: str, vuln_class: str) -> Optional[List[str]]:
+        if domain not in self._cache:
+            try:
+                with open(self._file(domain)) as f:
+                    self._cache[domain] = json.load(f)
+            except Exception:
+                self._cache[domain] = {}
+        return self._cache[domain].get(vuln_class)
+
+    def put(self, domain: str, vuln_class: str, payloads: List[str]):
+        self._cache.setdefault(domain, {})[vuln_class] = payloads
+        try:
+            with open(self._file(domain), 'w') as f:
+                json.dump(self._cache[domain], f, indent=2)
+        except Exception as e:
+            logger.warning("synth_store_write_failed", error=str(e))
+
+
+def _sanitize(items) -> List[str]:
+    """Valide/borne/filtre une liste de charges proposées."""
+    out, seen = [], set()
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        s = str(it).strip()
+        if not s or len(s) > _MAX_LEN or s in seen:
+            continue
+        if _DESTRUCTIVE.search(s):                 # jamais de charge destructive
+            logger.info("synth_dropped_destructive", payload=s[:40])
+            continue
+        seen.add(s)
+        out.append(s)
+        if len(out) >= _MAX_PAYLOADS:
+            break
+    return out
+
+
+def synthesize(vuln_class: str, fp: Dict, client=None,
+               store: Optional[SynthStore] = None, domain: str = 'unknown') -> List[str]:
+    """Rend des charges ciblées pour `vuln_class` (sqli|nosqli|xss|ssti|lfi). Cache
+    d'abord ; sinon l'IA propose (validée) et on persiste. Sans client -> []."""
+    if store is not None:
+        cached = store.get(domain, vuln_class)
+        if cached is not None:
+            return cached
+    if client is None:
+        return []
+    system = ("You are a payload generator for AUTHORIZED DAST. Given a target "
+              "fingerprint and a vulnerability class, propose up to 10 additional "
+              "DETECTION payloads (error-based, boolean, time-based) tailored to the "
+              "stack. STRICTLY non-destructive: never DROP/DELETE/UPDATE/INSERT/"
+              "shutdown/exec/rm. Return ONLY a JSON array of strings.")
+    user = f"class={vuln_class}\nfingerprint={json.dumps(fp)}"
+    try:
+        resp = client.complete(user, system=system)
+        data = _first_json_array(getattr(resp, 'content', '') or '')
+    except Exception as e:
+        logger.warning("synthesize_failed", vuln_class=vuln_class, error=str(e))
+        data = None
+    payloads = _sanitize(data)
+    if store is not None:
+        store.put(domain, vuln_class, payloads)     # persiste même si vide (évite de re-demander)
+    logger.info("payloads_synthesized", vuln_class=vuln_class, count=len(payloads))
+    return payloads
+
+
+def synthesize_for(har_data: Dict, classes, client=None, base_path: str = './patterns') -> Dict[str, List[str]]:
+    """Confort : empreinte + synthèse pour plusieurs classes, avec cache par domaine."""
+    if client is None:
+        return {}
+    fp = fingerprint(har_data)
+    domain = _domain(har_data)
+    store = SynthStore(base_path)
+    return {c: synthesize(c, fp, client, store, domain) for c in classes}
+
+
+def _domain(har_data: Dict) -> str:
+    for e in (har_data or {}).get('log', {}).get('entries', []) or []:
+        netloc = urlparse(e.get('request', {}).get('url', '')).netloc
+        if netloc:
+            return netloc
+    return 'unknown'
+
+
+def _first_json_array(text: str):
+    m = re.search(r'\[.*\]', text or '', re.S)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None

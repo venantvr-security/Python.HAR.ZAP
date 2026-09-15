@@ -1288,10 +1288,23 @@ def _run_injection_probes(har_data, config, args, zap_client):
     arbitré par l'IA si dispo."""
     from modules.injection_probes import run_injection_probes
     from modules.llm.adaptive_idor import client_from_config
-    adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
+    client = client_from_config(config) if getattr(args, 'ai', False) else None
+    adjud = _OwaspAdj(client) if client else None
     T = _diag_transport(config, args, zap_client, har_data)
     execute = lambda url, method='GET', body=None: T.send(method, url, None, body)
-    out = run_injection_probes(execute, har_data, adjudicator=adjud)
+
+    # Phase 3b : charges SQL synthétisées par l'IA selon l'empreinte du stack
+    # (proposées une fois, validées non-destructives, persistées).
+    extra_sqli = None
+    if client is not None:
+        from modules.llm.payload_synth import synthesize_for
+        patterns_base = (config.get('_paths') or {}).get('patterns', './patterns')
+        synth = synthesize_for(har_data, ['sqli'], client=client, base_path=patterns_base)
+        extra_sqli = synth.get('sqli') or None
+        if extra_sqli:
+            print(f"[INJECTION] {len(extra_sqli)} payload(s) SQL synthétisé(s) (IA)")
+
+    out = run_injection_probes(execute, har_data, adjudicator=adjud, extra_sqli=extra_sqli)
     print(f"[INJECTION] {len(out)} SQL/NoSQL finding(s)")
     return out
 

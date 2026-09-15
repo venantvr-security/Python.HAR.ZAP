@@ -41,3 +41,6 @@ patterns/zap_export/fuzzers/*
 !patterns/zap_export/fuzzers/llm_mass_assignment.txt
 patterns/zap_export/custom_payloads/*
 !patterns/zap_export/custom_payloads/llm_regex.json
+
+# Charges synthétisées par l'IA (cache par domaine) — artefact de run
+patterns/synth/
