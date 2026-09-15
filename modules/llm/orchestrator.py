@@ -33,6 +33,10 @@ logger = get_logger("llm.orchestrator")
 ENGINES = ('investigate', 'probes', 'web', 'injection', 'business_flow',
            'adaptive', 'matrix_bola', 'graphql')
 
+# Moteurs qui MODIFIENT l'état de la cible (écritures/transitions/mutations).
+# Exclus par une consigne « non destructif / lecture seule ».
+DESTRUCTIVE_ENGINES = frozenset({'business_flow', 'adaptive'})
+
 _URLISH = re.compile(r'(url|uri|link|src|dest|target|callback|redirect|next|image|'
                      r'fetch|webhook|file|path|doc|page|template)', re.I)
 
@@ -170,6 +174,133 @@ def ai_plan(client, ctx: Dict) -> Optional[Plan]:
             prio = 5
         steps.append(Step(eng, str(it.get('rationale', '')), max(1, min(9, prio))))
     return Plan(steps=steps, source='llm') if steps else None
+
+
+# --- Phase 3 : scoping en langage naturel -----------------------------------
+@dataclass
+class ScopeConstraints:
+    """Contraintes de périmètre déduites d'une consigne (`--goal`)."""
+    allow_engines: Optional[frozenset] = None   # si présent : ne garder que ceux-là
+    deny_engines: frozenset = frozenset()
+    path_include: List[str] = field(default_factory=list)   # ne cibler que ces sous-chemins
+    path_exclude: List[str] = field(default_factory=list)
+    non_destructive: bool = False
+    max_engines: Optional[int] = None
+    source: str = 'deterministic'
+
+    def apply(self, plan: Plan) -> Plan:
+        """Filtre un plan selon les contraintes (allow/deny, non destructif, budget)."""
+        steps = []
+        for s in plan.ordered():
+            if s.engine in self.deny_engines:
+                continue
+            if self.allow_engines is not None and s.engine not in self.allow_engines:
+                continue
+            if self.non_destructive and s.engine in DESTRUCTIVE_ENGINES:
+                continue
+            steps.append(s)
+        if self.max_engines:
+            # borne par priorité (steps déjà ordonnés), en préservant l'unicité de moteur
+            seen, kept = set(), []
+            for s in steps:
+                if s.engine not in seen:
+                    seen.add(s.engine)
+                    kept.append(s)
+                if len(seen) >= self.max_engines:
+                    break
+            steps = kept
+        return Plan(steps=steps, source=plan.source)
+
+    def to_dict(self) -> Dict:
+        return {'allow_engines': sorted(self.allow_engines) if self.allow_engines else None,
+                'deny_engines': sorted(self.deny_engines), 'path_include': self.path_include,
+                'path_exclude': self.path_exclude, 'non_destructive': self.non_destructive,
+                'max_engines': self.max_engines, 'source': self.source}
+
+
+_G_AUTHZ = re.compile(r'(authz|authoriz|access[\s-]*control|contrôle d.?acc|bola|bfla|'
+                      r'privileg|privilège|\bidor\b|\brole|\brôle)', re.I)
+_G_INJECT = re.compile(r'(inject|\bsqli?\b|no[\s-]?sql|\bsql\b)', re.I)
+_G_WEB = re.compile(r'(\bxss\b|traversal|\blfi\b|ssti|template|redirect|\bweb\b)', re.I)
+_G_SSRF = re.compile(r'\bssrf\b', re.I)
+_G_SHADOW = re.compile(r'(shadow|inventor|découverte d.?endpoint|\bdebug\b|actuator)', re.I)
+_G_NONDEST = re.compile(r'(non[\s-]?destructi|read[\s-]?only|lecture seule|passive|passif|'
+                        r'\bsafe\b|sans écriture|sans modif)', re.I)
+_G_PATH = re.compile(r'/[A-Za-z0-9][\w/\-]*')
+
+
+def _deterministic_goal(goal: str) -> ScopeConstraints:
+    allow = set()
+    if _G_AUTHZ.search(goal):
+        allow |= {'investigate', 'probes', 'matrix_bola', 'business_flow'}
+    if _G_INJECT.search(goal):
+        allow |= {'injection'}
+    if _G_WEB.search(goal):
+        allow |= {'web'}
+    if _G_SSRF.search(goal):
+        allow |= {'probes'}
+    if _G_SHADOW.search(goal):
+        allow |= {'investigate'}
+    include = _G_PATH.findall(goal)
+    return ScopeConstraints(
+        allow_engines=frozenset(allow) if allow else None,
+        path_include=include,
+        non_destructive=bool(_G_NONDEST.search(goal)),
+        source='deterministic')
+
+
+def interpret_goal(goal: Optional[str], client=None) -> Optional[ScopeConstraints]:
+    """Traduit une consigne libre en contraintes. L'IA raffine (allow/deny, chemins,
+    non destructif) et le CODE valide les moteurs contre la liste blanche ; sans
+    client -> parseur déterministe par mots-clés."""
+    if not goal:
+        return None
+    if client is not None:
+        c = _ai_goal(client, goal)
+        if c is not None:
+            return c
+    return _deterministic_goal(goal)
+
+
+def _ai_goal(client, goal: str) -> Optional[ScopeConstraints]:
+    system = ("Translate a pentest scoping instruction into JSON constraints. Return ONLY: "
+              "{\"allow_engines\":[...]|null,\"deny_engines\":[...],\"path_include\":[...],"
+              "\"path_exclude\":[...],\"non_destructive\":true|false}. Engines MUST be a "
+              "subset of: " + ', '.join(ENGINES) + ". path_* are URL path substrings. No prose.")
+    try:
+        resp = client.complete(f"Instruction:\n{goal}", system=system)
+        data = _first_json(getattr(resp, 'content', '') or '')
+    except Exception as e:
+        logger.warning("ai_goal_failed", error=str(e))
+        return None
+    if not isinstance(data, dict):
+        return None
+    allow = data.get('allow_engines')
+    allow = frozenset(e for e in allow if e in ENGINES) if isinstance(allow, list) else None
+    deny = data.get('deny_engines')
+    deny = frozenset(e for e in deny if e in ENGINES) if isinstance(deny, list) else frozenset()
+    inc = [p for p in (data.get('path_include') or []) if isinstance(p, str)]
+    exc = [p for p in (data.get('path_exclude') or []) if isinstance(p, str)]
+    return ScopeConstraints(allow_engines=(allow or None), deny_engines=deny,
+                            path_include=inc, path_exclude=exc,
+                            non_destructive=bool(data.get('non_destructive')), source='llm')
+
+
+def filter_har(har_data: Dict, include: Optional[List[str]] = None,
+               exclude: Optional[List[str]] = None) -> Dict:
+    """Restreint les entrées du HAR aux chemins voulus (scoping « only /billing »).
+    Sans filtre -> le HAR d'origine (même objet)."""
+    if not include and not exclude:
+        return har_data
+    ents = []
+    for e in (har_data or {}).get('log', {}).get('entries', []) or []:
+        path = urlparse(e.get('request', {}).get('url', '')).path
+        if include and not any(inc in path for inc in include):
+            continue
+        if exclude and any(exc in path for exc in exclude):
+            continue
+        ents.append(e)
+    return {'log': {'entries': ents}}
 
 
 def next_plan(har_data: Dict, findings: Optional[List[Dict]] = None, client=None) -> Plan:
