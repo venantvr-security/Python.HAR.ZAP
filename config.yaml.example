@@ -544,3 +544,32 @@ llm:
     enabled: true
     directory: "./.llm_cache"
     ttl_hours: 24
+
+# ---------------------------------------------------------------------------
+# Ré-authentification enfichable (modules.reauth) — pour un DAST authentifié
+# quand la session TOURNE (nonce anti-rejeu au login + jeton renouvelé + fin de
+# session). Absent => désactivé. `ReAuthenticator.from_config(config, client)`.
+# Chaque bloc choisit une STRATÉGIE par nom ; 'ai' déduit la spec du code source
+# (nécessite un client LLM + attestation d'autorisation).
+# ---------------------------------------------------------------------------
+# reauth:
+#   base_url: "https://app.example"
+#   login:
+#     url: "/login"
+#     method: "POST"
+#     credentials: { username: "tester", password: "..." }  # secrets: préférer l'env
+#     nonce_field: "csrf"          # nom du champ où réinjecter le nonce
+#   nonce:                         # d'où vient le nonce + comment l'extraire
+#     strategy: "ai"               # ai | regex | json | cookie
+#     url: "/login"
+#     # regex: pattern/group ; json: path ; cookie: cookie
+#   session:                       # comment récupérer la session après login
+#     strategy: "ai"               # ai | cookie | json | header
+#   rotation:                      # le matériel « renew » à chaque réponse
+#     strategy: "cookie"           # cookie | header | none
+#   expiry:                        # quand re-loguer (composables en OU)
+#     strategies:
+#       - { strategy: "cookie_ttl", skew: 30 }     # PROACTIF : TTL portée par le cookie/JWT
+#       - { strategy: "redirect", login_path: "/login" }  # RÉACTIF : 401/redirection
+#       - { strategy: "ai" }                        # NÉGOCIÉ : l'IA juge la réponse
+#   source: "<extrait du handler de login, pour les stratégies 'ai'>"
