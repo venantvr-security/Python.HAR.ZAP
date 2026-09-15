@@ -732,17 +732,30 @@ def run_matrix_cmd(args):
     extra = _run_matrix_bola(role_hars, roles, execute, client=_bola_client) \
         if getattr(args, 'bola', False) else []
     # Sortie findings-first des violations + rapports.
-    findings = build_findings(matrix.violation_findings() + extra)
+    raw_findings = matrix.violation_findings() + extra
+    findings = build_findings(raw_findings)
     if findings:
         print(render_cli(findings))
+
+    # Narratif d'attaque partagé avec diagnose : chaînes d'exploitation composées
+    # depuis les violations d'accès (BOLA/BFLA) + actions ciblées recommandées.
+    from modules.llm.exploit_chainer import compose_chains
+    from modules.llm.followup import directed_followups
+    chains = compose_chains(raw_findings, client=_bola_client)
+    recs = directed_followups(raw_findings)
+    if chains:
+        print(f"[CHAINS] {len(chains)} chaîne(s) d'exploitation composée(s)")
+
     report = {'target': ','.join(r.name for r in roles), 'summary': matrix.summary(),
-              'grid': matrix.grid, 'findings': [f.to_dict() for f in findings]}
+              'grid': matrix.grid, 'findings': [f.to_dict() for f in findings],
+              'exploit_chains': [c.to_dict() for c in chains], 'directed_followups': recs}
     with open(Path(args.output) / 'access_matrix.json', 'w') as f:
         json.dump(report, f, indent=2)
     if 'html' in args.format:
         html_path = Path(args.output) / 'access_matrix.html'
-        html_path.write_text(render_html(findings, {'target': 'access-control matrix',
-                                                    'har_file': f"{len(roles)} roles"}))
+        html_path.write_text(render_html(
+            findings, {'target': 'access-control matrix', 'har_file': f"{len(roles)} roles"},
+            chains=report['exploit_chains'], recommendations=recs))
         print(f"Findings-first report: {html_path}")
     print(f"\nResults: {args.output}/access_matrix.*")
 

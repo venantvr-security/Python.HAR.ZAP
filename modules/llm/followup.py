@@ -78,18 +78,19 @@ def directed_followups(findings: List[Dict]) -> List[Dict]:
         if 'alg=none' in name or ('jwt' in name and 'bypass' in name):
             recs.append({'trigger': f.get('name'),
                          'action': "Forger un jeton role=admin et énumérer les fonctions privilégiées (BFLA)"})
-        if 'bola' in src or 'object accessible' in name or 'api_key' in name:
+        if 'bola' in src or 'bola' in name or 'object accessible' in name \
+                or 'api_key' in name or 'access-control break' in name:
             recs.append({'trigger': f.get('name'),
                          'action': "Énumérer les identifiants d'objets et rejouer avec la clé/objet fuité"})
         if 'sql' in name and 'injection' in name:
             recs.append({'trigger': f.get('name'),
                          'action': "Extraire le schéma puis les données via UNION/booléen (dump borné)"})
-    # dédup par (trigger, action)
+    # dédup par ACTION (une action identique déclenchée par plusieurs findings ->
+    # une seule recommandation, sur le premier déclencheur).
     uniq, seen = [], set()
     for r in recs:
-        k = (r['trigger'], r['action'])
-        if k not in seen:
-            seen.add(k)
+        if r['action'] not in seen:
+            seen.add(r['action'])
             uniq.append(r)
     return uniq
 

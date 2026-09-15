@@ -46,10 +46,10 @@ class TestDirectedFollowups:
         actions = ' '.join(r['action'] for r in recs).lower()
         assert 'interne' in actions and 'bfla' in actions and 'rejouer' in actions and 'union' in actions
 
-    def test_dedup(self):
+    def test_dedup_by_action(self):
         f = [{'name': 'SSRF a', 'source': 'probe_api7'}, {'name': 'SSRF b', 'source': 'probe_api7'}]
-        # deux triggers différents -> deux recos ; même action mais triggers distincts
-        assert len(directed_followups(f)) == 2
+        # même ACTION (deux SSRF) -> une seule recommandation
+        assert len(directed_followups(f)) == 1
 
 
 class TestRunFollowups:
