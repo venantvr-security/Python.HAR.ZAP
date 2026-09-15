@@ -407,6 +407,49 @@ def search(c):
     return Resp(200, html)
 
 
+@route("GET", "/articles/search")
+def articles_search(c):
+    """VULN (SQLi, SIMULÉE sans vraie base — pédagogique). On modélise la requête
+    `SELECT * FROM articles WHERE title = '<q>'` : `q` est concaténé sans échapper.
+    - apostrophes non appariées -> requête cassée -> erreur SGBD (error-based) ;
+    - tautologie `' OR '1'='1` -> tout sort, brouillons compris (boolean-based) ;
+    - `SLEEP(n)` -> délai réel (time-based)."""
+    q = c.query.get("q", "")
+    low = q.lower()
+    m = re.search(r"sleep\((\d+)\)", low)                     # time-based
+    if m:
+        time.sleep(min(int(m.group(1)), 6))
+        return 200, {"results": []}
+    if q.count("'") % 2 == 1:                                 # guillemet non apparié -> erreur
+        return 500, {"error": "You have an error in your SQL syntax; check the manual that "
+                              "corresponds to your MySQL server version near \"'\" at line 1"}
+    if re.search(r"or\s+'?1'?\s*=\s*'?1", low) or "or 1=1" in low:   # tautologie
+        return 200, {"results": list(DB["articles"].values())}
+    res = [a for a in DB["articles"].values() if low in a["title"].lower()]
+    return 200, {"results": res}
+
+
+@route("POST", "/articles/query")
+def articles_query(c):
+    """VULN (NoSQLi, SIMULÉE façon Mongo). Le filtre `title` est passé tel quel :
+    - un OPÉRATEUR ($ne/$gt/$regex/$in) élargit le résultat à tout (bypass de filtre) ;
+    - `$where: "sleep(ms)"` -> délai (time-based) ;
+    - opérateur inconnu -> MongoError (error-based)."""
+    spec = c.body.get("title", "")
+    if isinstance(spec, dict):
+        if "$where" in spec:
+            m = re.search(r"sleep\((\d+)\)", str(spec.get("$where", "")).lower())
+            if m:
+                time.sleep(min(int(m.group(1)) // 1000 or int(m.group(1)), 6))
+            return 200, {"results": list(DB["articles"].values())}
+        if any(k in spec for k in ("$ne", "$gt", "$lt", "$regex", "$in")):
+            return 200, {"results": list(DB["articles"].values())}   # opérateur -> tout
+        return 500, {"error": "MongoServerError: unknown operator: "
+                              + next(iter(spec), "?")}
+    res = [a for a in DB["articles"].values() if a["title"] == spec]
+    return 200, {"results": res}
+
+
 # --- Rendu de gabarit : SSTI ------------------------------------------------
 @route("POST", "/preview")
 def preview(c):
