@@ -180,6 +180,10 @@ Examples:
     diag_parser.add_argument('har_file', help='HAR file to analyze')
     diag_parser.add_argument('--target', required=True, help='Target URL (e.g., https://www.example.com)')
     diag_parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    diag_parser.add_argument('--run-id',
+                             help='Isolate this run (per-user): dedicated paths '
+                                  '(patterns/cache/DSL/output) + a unique ZAP port, '
+                                  'so concurrent runs never interact (modules.run_context)')
     diag_parser.add_argument('--format', default='json,html',
                              help='Output formats: json,html,sarif,junit')
     diag_parser.add_argument('--max-high', type=int, help='Max high severity (fail-fast)')
@@ -644,8 +648,6 @@ def _run_matrix_bola(role_hars, roles, execute, client=None):
 
 
 def run_matrix_cmd(args):
-    if getattr(args, 'i_am_authorized', False):
-        os.environ['HARZAP_AI_AUTHORIZED'] = '1'
     """Construit la matrice d'accès multi-rôles et cartographie BOLA/BFLA."""
     from modules.access_matrix import (Role, build_endpoints, run_matrix, render_matrix_cli)
     from modules.idor_detector import IDORDetector
@@ -709,7 +711,10 @@ def run_matrix_cmd(args):
     _bola_client = None
     if getattr(args, 'bola', False) and getattr(args, 'ai', False):
         from modules.llm.adaptive_idor import client_from_config
-        _bola_client = client_from_config(load_config(getattr(args, 'config', None)))
+        _cfg = load_config(getattr(args, 'config', None))
+        if getattr(args, 'i_am_authorized', False):        # autorisation par config,
+            _cfg.setdefault('llm', {})['authorized'] = True  # jamais par l'env global
+        _bola_client = client_from_config(_cfg)
     extra = _run_matrix_bola(role_hars, roles, execute, client=_bola_client) \
         if getattr(args, 'bola', False) else []
     # Sortie findings-first des violations + rapports.
@@ -1135,7 +1140,8 @@ def _enrich_zap_payloads(all_findings, args, report):
         return
 
     domain = urlparse(args.target).netloc or 'unknown'
-    enricher = PatternEnricher.for_run(domain=domain, base_path='./patterns')
+    patterns_base = (config.get('_paths') or {}).get('patterns', './patterns')
+    enricher = PatternEnricher.for_run(domain=domain, base_path=patterns_base)
     counts = {pt: enricher.record_payloads(pt, pls) for pt, pls in buckets.items()}
     exported = enricher.flush()
     total = sum(counts.values())
@@ -1336,7 +1342,8 @@ def _run_adaptive_campaign(har_data, config, args, zap_client=None):
 
     client = client_from_config(config)
     domain = urlparse(args.target).netloc or 'unknown'
-    enricher = PatternEnricher.for_run(domain=domain, base_path='./patterns')
+    patterns_base = (config.get('_paths') or {}).get('patterns', './patterns')
+    enricher = PatternEnricher.for_run(domain=domain, base_path=patterns_base)
 
     print(f"\n[ADAPTIVE] transport: {transport} | "
           f"LLM: {'on' if client else 'offline heuristics'} | "
@@ -1384,8 +1391,6 @@ def _diag_findings_to_alerts(all_findings):
 
 
 def run_diagnose(args):
-    if getattr(args, 'i_am_authorized', False):
-        os.environ['HARZAP_AI_AUTHORIZED'] = '1'
     """Run full diagnostic attack suite.
 
     Orchestre en une seule commande : ZAP scan + red-team Python + modules
@@ -1418,6 +1423,26 @@ def run_diagnose(args):
         print(f"Error: HAR file not found: {args.har_file}", file=sys.stderr)
         return 1
 
+    config = load_config()
+
+    # Isolation « 1 run par user » : --run-id -> chemins + port ZAP dédiés, et
+    # l'AUTORISATION passe par la config (jamais par l'env global os.environ, qui
+    # serait partagé par tous les threads du process — cf. modules.run_context).
+    run_ctx = None
+    if getattr(args, 'run_id', None):
+        import hashlib
+        from modules.run_context import RunContext
+        idx = int(hashlib.sha1(args.run_id.encode()).hexdigest()[:4], 16) % 50
+        run_ctx = RunContext.for_run(args.run_id, index=idx,
+                                     authorized=getattr(args, 'i_am_authorized', False))
+        config = run_ctx.config_overlay(config)
+        if args.output == './output':                      # défaut non surchargé
+            args.output = run_ctx.output_dir
+        print(f"[ISOLATION] run '{args.run_id}': base={run_ctx.base_dir} "
+              f"zap_port={run_ctx.zap_port}")
+    if getattr(args, 'i_am_authorized', False):
+        config.setdefault('llm', {})['authorized'] = True
+
     Path(args.output).mkdir(parents=True, exist_ok=True)
 
     print(f"[DIAGNOSE] Target: {args.target}")
@@ -1426,7 +1451,6 @@ def run_diagnose(args):
     with open(args.har_file) as f:
         har_data = json.load(f)
 
-    config = load_config()
     all_findings = []
     docker_manager = None
     zap_client = None
