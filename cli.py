@@ -222,6 +222,8 @@ Examples:
                              help='Analyze third-party API consumption (API10): cleartext, redirects, deps')
     diag_parser.add_argument('--web', action='store_true',
                              help='Active web blind-spot probes: path traversal/LFI, SSTI, reflected/stored XSS, open redirect, predictable reset token, CSV injection')
+    diag_parser.add_argument('--injection', action='store_true',
+                             help='Active SQL/NoSQL injection probes: error-based, time-based (differential), boolean-based, NoSQL operator injection')
     diag_parser.add_argument('--ai-record', metavar='FILE',
                              help='Record all LLM responses to a transcript (implies --ai)')
     diag_parser.add_argument('--ai-replay', metavar='FILE',
@@ -1207,6 +1209,20 @@ def _run_web_probes(har_data, config, args, zap_client):
     return out
 
 
+def _run_injection_probes(har_data, config, args, zap_client):
+    """Sondes d'injection SQL/NoSQL (A03) via le transport partagé. error-based &
+    time-based = CONFIRMED (marqueur/différentiel) ; boolean/near-miss = SUSPECTED
+    arbitré par l'IA si dispo."""
+    from modules.injection_probes import run_injection_probes
+    from modules.llm.adaptive_idor import client_from_config
+    adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
+    T = _diag_transport(config, args, zap_client, har_data)
+    execute = lambda url, method='GET', body=None: T.send(method, url, None, body)
+    out = run_injection_probes(execute, har_data, adjudicator=adjud)
+    print(f"[INJECTION] {len(out)} SQL/NoSQL finding(s)")
+    return out
+
+
 def _run_shadow_endpoints(har_data, args, config):
     """Diff HAR ↔ OpenAPI → endpoints fantômes (API9)."""
     from modules.openapi_importer import OpenAPIImporter
@@ -1641,6 +1657,10 @@ def run_diagnose(args):
         # Web blind-spots (path traversal, SSTI, XSS, open redirect, weak reset, CSV).
         if getattr(args, 'web', False):
             all_findings.extend(_run_web_probes(har_data, config, args, zap_client))
+
+        # SQL/NoSQL injection (A03).
+        if getattr(args, 'injection', False):
+            all_findings.extend(_run_injection_probes(har_data, config, args, zap_client))
 
         # Enrichissement ZAP : charges prouvées (SSRF/traversal/SSTI/XSS/redirect)
         # -> wordlists de fuzzer, comme la campagne adaptative pour IDOR/mass-assign.
