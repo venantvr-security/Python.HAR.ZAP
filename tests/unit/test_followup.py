@@ -63,3 +63,18 @@ class TestRunFollowups:
         harvested, recs = run_followups(findings, ex)
         assert any('service_token' in h['name'] for h in harvested)
         assert any('interne' in r['action'].lower() for r in recs)
+
+
+class TestSecretPlaceholderFilter:
+    def _f(self):
+        return [{'name': 'Shadow: GET /debug/config', 'url': 'http://x/debug/config',
+                 'status': 'confirmed', 'owasp': 'API9:2023'}]
+
+    def test_placeholder_value_is_not_a_secret(self):
+        for body in ('{"password":"required"}', '{"secret":"string"}', '{"api_key":"true"}'):
+            assert harvest_secrets(self._f(), lambda u, m='GET', b=None: {'body': body}) == []
+
+    def test_real_secret_still_harvested(self):
+        out = harvest_secrets(self._f(),
+                              lambda u, m='GET', b=None: {'body': '{"secret_key":"cms_dev_secret_2024"}'})
+        assert out and 'secret_key' in out[0]['name']

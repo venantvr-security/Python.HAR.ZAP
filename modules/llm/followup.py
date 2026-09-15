@@ -31,6 +31,24 @@ _SECRET = re.compile(
 
 _SHADOW_HINT = re.compile(r'(shadow|debug|/config|actuator|inventory|/env)', re.I)
 
+# Valeurs manifestement NON secrètes (placeholders de schéma/doc) : écarte les FP
+# du type {"password":"required"} ou {"secret":"string"}.
+_PLACEHOLDERS = frozenset({
+    'required', 'optional', 'true', 'false', 'null', 'none', 'string', 'number',
+    'integer', 'boolean', 'object', 'array', 'example', 'changeme', 'redacted',
+    'hidden', 'value', 'todo', 'xxx', 'yourkey', 'yourtoken', 'undefined'})
+
+
+def _looks_secret(v: str) -> bool:
+    """Un vrai secret a de l'entropie : au moins 8 caractères, et pas un simple
+    mot minuscule / placeholder de schéma."""
+    v = (v or '').strip()
+    if len(v) < 8 or v.lower() in _PLACEHOLDERS:
+        return False
+    if re.fullmatch(r'[a-z]+', v):        # mot purement minuscule -> pas un secret
+        return False
+    return True
+
 
 def harvest_secrets(findings: List[Dict], execute_fn: Callable) -> List[Dict]:
     """Relit les endpoints shadow CONFIRMÉS et escalade les secrets exposés."""
@@ -49,7 +67,9 @@ def harvest_secrets(findings: List[Dict], execute_fn: Callable) -> List[Dict]:
         r = execute_fn(url, 'GET', None) or {}
         body = r.get('body', '') or ''
         for m in _SECRET.finditer(body):
-            field = m.group(1)
+            field, value = m.group(1), m.group(2)
+            if not _looks_secret(value):        # écarte les valeurs placeholder (FP)
+                continue
             out.append({
                 'source': 'followup', 'risk': 'Critical', 'owasp': 'API8:2023',
                 'name': f"Secret exposed via {urlparse(url).path}: {field}",
