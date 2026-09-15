@@ -50,6 +50,31 @@ def _normalize(s: str) -> str:
     s = re.sub(r"\s+", " ", s)                       # espaces multiples
     return s
 
+# Allowlist par MOTS-CLÉS (défense en profondeur, complète le blocklist). Une
+# charge SQL n'est acceptée que si TOUT mot-clé SQL reconnu qu'elle contient est
+# « sûr » (détection/lecture). Un mot-clé reconnu mais hors set sûr -> rejet, même
+# si le blocklist l'a manqué. Les identifiants (admin, users, colonnes) ne sont
+# pas des mots-clés -> ignorés, donc admin'-- - reste accepté.
+_SAFE_SQL_KW = frozenset((
+    "or and not union select null from where sleep pg_sleep waitfor delay version "
+    "user current_user session_user database schema information_schema concat "
+    "group_concat char chr cast convert ascii substring substr mid length count "
+    "limit offset order group by as all distinct case when then else end like in "
+    "between is exists true false having desc asc rlike regexp on join").split())
+_DANGEROUS_SQL_KW = frozenset((
+    "drop delete update insert replace truncate alter create exec execute outfile "
+    "dumpfile load_file benchmark copy shutdown grant revoke merge call into "
+    "sp_configure sp_executesql xp_cmdshell pg_read_file pg_ls_dir lo_import "
+    "lo_export lo_get openrowset opendatasource").split())
+_ALL_SQL_KW = _SAFE_SQL_KW | _DANGEROUS_SQL_KW
+
+
+def _sql_shape_ok(norm_lower: str) -> bool:
+    """Allowlist : rejette si un mot-clé SQL RECONNU est hors du set sûr."""
+    words = set(re.findall(r'[a-z_]{2,}', norm_lower))
+    return not (words & _ALL_SQL_KW) - _SAFE_SQL_KW
+
+
 _MAX_PAYLOADS = 12
 _MAX_LEN = 200
 
@@ -118,8 +143,9 @@ class SynthStore:
             logger.warning("synth_store_write_failed", error=str(e))
 
 
-def _sanitize(items) -> List[str]:
-    """Valide/borne/filtre une liste de charges proposées."""
+def _sanitize(items, vuln_class: str = 'sqli') -> List[str]:
+    """Valide/borne/filtre une liste de charges proposées : blocklist (motifs
+    destructifs dé-obfusqués) + allowlist par mots-clés SQL (pour la classe sqli)."""
     out, seen = [], set()
     if not isinstance(items, list):
         return out
@@ -127,8 +153,12 @@ def _sanitize(items) -> List[str]:
         s = str(it).strip()
         if not s or len(s) > _MAX_LEN or s in seen:
             continue
-        if _DESTRUCTIVE.search(_normalize(s)):      # jamais de charge destructive (dé-obfusquée)
+        norm = _normalize(s)
+        if _DESTRUCTIVE.search(norm):               # blocklist : charge destructive
             logger.info("synth_dropped_destructive", payload=s[:40])
+            continue
+        if vuln_class == 'sqli' and not _sql_shape_ok(norm.lower()):
+            logger.info("synth_dropped_off_allowlist", payload=s[:40])
             continue
         seen.add(s)
         out.append(s)
@@ -159,7 +189,7 @@ def synthesize(vuln_class: str, fp: Dict, client=None,
     except Exception as e:
         logger.warning("synthesize_failed", vuln_class=vuln_class, error=str(e))
         data = None
-    payloads = _sanitize(data)
+    payloads = _sanitize(data, vuln_class)
     if store is not None:
         store.put(domain, vuln_class, payloads)     # persiste même si vide (évite de re-demander)
     logger.info("payloads_synthesized", vuln_class=vuln_class, count=len(payloads))

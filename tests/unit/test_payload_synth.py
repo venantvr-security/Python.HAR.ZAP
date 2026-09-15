@@ -90,3 +90,22 @@ class TestDestructiveHardening:
         legit = ["' OR '1'='1", "' OR SLEEP(5)-- -", "' UNION SELECT NULL-- -",
                  "1' AND '1'='1", "' OR pg_sleep(3)-- -"]
         assert _sanitize(legit) == legit                  # détection non altérée
+
+
+class TestKeywordAllowlist:
+    def test_off_allowlist_rejected_even_if_blocklist_misses(self):
+        # mots-clés SQL reconnus HORS set sûr -> rejet par l'allowlist
+        for p in ["' AND LOAD_FILE('/etc/shadow')-- -", "' OR BENCHMARK(1e8,MD5(1))-- -",
+                  "'; SELECT 1 INTO OUTFILE '/x'-- -", "'; GRANT ALL-- -",
+                  "' UNION SELECT lo_get(1)-- -", "' OR pg_read_file('/etc/passwd')-- -"]:
+            assert _sanitize([p]) == [], p
+
+    def test_legit_detection_incl_identifiers_and_error_funcs_kept(self):
+        legit = ["admin'-- -", "' or 1=1#", "' UNION SELECT version(),user()-- -",
+                 "' AND extractvalue(1,concat(0x7e,version()))-- -",
+                 "1' ORDER BY 5-- -", "' AND '1'='2"]
+        assert _sanitize(legit) == legit                  # identifiants/fonctions non-mot-clé OK
+
+    def test_allowlist_skipped_for_non_sqli_class(self):
+        # une charge XSS ne doit pas être filtrée par l'allowlist SQL
+        assert _sanitize(["<svg/onload=alert(1)>"], vuln_class='xss') == ["<svg/onload=alert(1)>"]
