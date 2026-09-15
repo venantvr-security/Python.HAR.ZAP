@@ -980,40 +980,103 @@ def _zap_reachable(zap_url, timeout=1.5):
         return False
 
 
-def _diag_http_get(zap_client, auth):
-    """Exécuteur (url, method, body=None) via ZAP si dispo, sinon requests direct.
-    `body` (dict) permet à la sonde SSRF d'injecter dans un corps JSON, pas
-    seulement dans la query string."""
-    if zap_client is not None:
-        def get(url, method='GET', body=None):
-            r = zap_client.request(method, url, headers=auth, json_data=body,
-                                   follow_redirects=False)
-            return {'status': r.status_code, 'content_length': len(r.content or b''),
-                    'body': (r.text or '')[:2000]}
-        return get
-    import requests
+class _DiagTransport:
+    """Transport HTTP unique et session-aware pour tous les moteurs de diagnose.
 
-    def get(url, method='GET', body=None):
-        try:
-            r = requests.request(method, url, headers=auth, json=body, timeout=10,
-                                 verify=False, allow_redirects=False)
-            return {'status': r.status_code, 'content_length': len(r.content), 'body': r.text[:2000]}
-        except Exception:
-            return {'status': 0, 'content_length': 0, 'body': ''}
-    return get
+    Sans bloc `reauth` (ou sans attestation) : injecte l'auth STATIQUE du HAR —
+    comportement historique inchangé. Avec `reauth` + attestation : établit une
+    session VIVANTE (login nonce-aware + rotation + re-auth) et l'injecte à chaque
+    requête via ReAuthenticator.wrap — c'est le câblage demandé. `.base` reste
+    tokenless (le forge-auth API2 a besoin d'une baseline SANS jeton)."""
+
+    def __init__(self, zap_client, config, har_data):
+        from modules.idor_detector import IDORDetector
+        self.static_auth = IDORDetector.extract_auth_tokens(har_data) or {}
+        self._base = self._make_base(zap_client)
+        self.reauth = None
+        self.active = False
+
+        if config.get('reauth'):
+            from modules.llm.client import ai_authorized
+            if not ai_authorized(config):
+                print("[REAUTH] config présente mais non attestée "
+                      "(--i-am-authorized requis) — session vivante désactivée")
+            else:
+                from modules.reauth import ReAuthenticator
+                from modules.llm.adaptive_idor import client_from_config
+                self.reauth = ReAuthenticator.from_config(config, client=client_from_config(config))
+                if self.reauth and self.reauth.login(self._base):
+                    self.active = True
+                    print(f"[REAUTH] session vivante établie (login {self.reauth.recipe.login_url})")
+                else:
+                    self.reauth = None
+                    print("[REAUTH] login initial échoué — repli sur l'auth statique du HAR")
+
+        if self.active:
+            self.send = self.reauth.wrap(self._base)     # session injectée + rotation + re-auth
+        else:
+            def _static(method, url, headers=None, body=None):
+                return self._base(method, url, {**self.static_auth, **(headers or {})}, body)
+            self.send = _static
+
+    @staticmethod
+    def _make_base(zap_client):
+        """Transport brut (aucune injection d'auth). Retourne status/body/location/
+        content_type/headers pour couvrir tous les moteurs (SSRF, XSS, open redirect…)."""
+        if zap_client is not None:
+            def base(method, url, headers=None, body=None):
+                r = zap_client.request(method, url, headers=headers or {}, json_data=body,
+                                       follow_redirects=False)
+                h = dict(getattr(r, 'headers', None) or {})
+                return {'status': r.status_code, 'body': (r.text or '')[:4000],
+                        'location': h.get('Location', '') or h.get('location', ''),
+                        'content_type': h.get('Content-Type', '') or h.get('content-type', ''),
+                        'headers': h, 'content_length': len(r.content or b'')}
+            return base
+        import requests
+
+        def base(method, url, headers=None, body=None):
+            try:
+                r = requests.request(method, url, headers=headers or {}, json=body,
+                                     timeout=10, verify=False, allow_redirects=False)
+                return {'status': r.status_code, 'body': r.text[:4000],
+                        'location': r.headers.get('Location', ''),
+                        'content_type': r.headers.get('Content-Type', ''),
+                        'headers': dict(r.headers), 'content_length': len(r.content)}
+            except Exception:
+                return {'status': 0, 'body': '', 'location': '', 'content_type': '',
+                        'headers': {}, 'content_length': 0}
+        return base
+
+    def base(self, method, url, headers=None, body=None):
+        """Envoi SANS injection d'auth (baseline forge-auth)."""
+        return self._base(method, url, headers, body)
+
+    def auth_headers(self) -> dict:
+        """En-têtes d'auth courants (session vivante si reauth, sinon HAR statique)."""
+        return self.reauth.store.auth_headers() if self.active else dict(self.static_auth)
+
+
+def _diag_transport(config, args, zap_client, har_data):
+    """Construit (et met en cache sur args) le transport partagé du run."""
+    t = getattr(args, '_transport', None)
+    if t is None:
+        t = _DiagTransport(zap_client, config, har_data)
+        args._transport = t
+    return t
 
 
 def _run_active_probes(har_data, config, args, zap_client):
-    """Sondes API2/API4/API7. auth = statique ; rate-limit/SSRF = via exécuteur."""
+    """Sondes API2/API4/API7. rate-limit/SSRF via le transport partagé (session
+    vivante si reauth est configuré, sinon auth statique du HAR)."""
     from modules.active_probes import probe_auth, probe_rate_limit, probe_ssrf, ssrf_targets
     from modules.llm.adaptive_campaign import get_targets
-    from modules.idor_detector import IDORDetector
     from modules.llm.adaptive_idor import client_from_config
 
     out = [pf.flat() for pf in probe_auth(har_data)]   # API2 — sans réseau
 
-    auth = IDORDetector.extract_auth_tokens(har_data) or {}
-    get = _diag_http_get(zap_client, auth)
+    T = _diag_transport(config, args, zap_client, har_data)
+    get = lambda url, method='GET', body=None: T.send(method, url, None, body)
     targets = get_targets(har_data, limit=8)
     # API4 : rate-limit sur le premier endpoint GET (borné pour ne pas noyer la cible).
     if targets:
@@ -1049,28 +1112,11 @@ def _run_business_flow(har_data, config, args, zap_client):
     """Moteur actif d'abus de flux métier (API6). Exécuteur via ZAP sinon requests ;
     l'adjudicateur LLM (avec --ai) tranche les cas ambigus."""
     from modules.business_flow import extract_flows, BusinessFlowScanner
-    from modules.idor_detector import IDORDetector
     from modules.llm.adaptive_idor import client_from_config
 
-    auth = IDORDetector.extract_auth_tokens(har_data) or {}
-
-    def execute(method, url, headers, body):
-        hdrs = {**(headers or {}), **auth}
-        if zap_client is not None:
-            r = zap_client.request(method, url, headers=hdrs, json_data=body,
-                                   follow_redirects=False)
-            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
-        import requests
-        try:
-            r = requests.request(method, url, headers=hdrs, json=body, timeout=10,
-                                 verify=False, allow_redirects=False)
-            return {'status': r.status_code, 'body': r.text[:2000]}
-        except Exception:
-            return {'status': 0, 'body': ''}
-
-    def read(url):
-        """GET pour confirmer qu'une transition d'état a bien pris effet (readback)."""
-        return execute('GET', url, {}, None)
+    T = _diag_transport(config, args, zap_client, har_data)
+    execute = lambda method, url, headers, body: T.send(method, url, headers, body)
+    read = lambda url: T.send('GET', url, None, None)   # readback de transition
 
     adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
     flows = extract_flows(har_data)
@@ -1088,26 +1134,14 @@ def _run_investigations(har_data, config, args, zap_client):
     automatique) : le forge-auth a besoin d'une baseline SANS jeton, l'auth
     explicite du HAR n'est passée qu'au sondage des routes."""
     from modules.investigations import run_investigations
-    from modules.idor_detector import IDORDetector
     from modules.llm.adaptive_idor import client_from_config
-    auth = IDORDetector.extract_auth_tokens(har_data) or {}
     client = client_from_config(config) if getattr(args, 'ai', False) else None
 
-    def send(method, url, headers=None, json_body=None):
-        hdrs = headers or {}          # jamais d'injection d'auth implicite
-        if zap_client is not None:
-            r = zap_client.request(method, url, headers=hdrs, json_data=json_body,
-                                   follow_redirects=False)
-            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
-        import requests
-        try:
-            r = requests.request(method, url, headers=hdrs, json=json_body,
-                                 timeout=10, verify=False, allow_redirects=False)
-            return {'status': r.status_code, 'body': r.text[:2000]}
-        except Exception:
-            return {'status': 0, 'body': ''}
-
-    out = run_investigations(har_data, send, args.target, headers=auth, client=client)
+    T = _diag_transport(config, args, zap_client, har_data)
+    # send TOKENLESS : le forge-auth (API2) exige une baseline SANS jeton. L'auth
+    # (session vivante reauth, sinon HAR statique) n'est passée qu'au sondage des routes.
+    send = lambda method, url, headers=None, json_body=None: T.base(method, url, headers, json_body)
+    out = run_investigations(har_data, send, args.target, headers=T.auth_headers(), client=client)
     print(f"[INVESTIGATE] {len(out)} finding(s) (shadow routes + auth forge)")
     return out
 
@@ -1158,30 +1192,14 @@ def _run_web_probes(har_data, config, args, zap_client):
     prédictible, CSV. L'exécuteur rejoue l'auth du HAR et expose l'en-tête
     Location (nécessaire à l'open redirect), redirections NON suivies."""
     from modules.web_probes import run_web_probes
-    from modules.idor_detector import IDORDetector
     from modules.llm.adaptive_idor import client_from_config
-    auth = IDORDetector.extract_auth_tokens(har_data) or {}
     # IA optionnelle : arbitre les near-miss en SUSPECTED (aucun effet offline).
     adjud = _OwaspAdj(client_from_config(config)) if getattr(args, 'ai', False) else None
 
-    def execute(url, method='GET', body=None):
-        if zap_client is not None:
-            r = zap_client.request(method, url, headers=auth, json_data=body,
-                                   follow_redirects=False)
-            hdrs = r.headers or {}
-            loc = hdrs.get('Location', '') or hdrs.get('location', '')
-            ct = hdrs.get('Content-Type', '') or hdrs.get('content-type', '')
-            return {'status': r.status_code, 'body': (r.text or '')[:4000],
-                    'location': loc, 'content_type': ct}
-        import requests
-        try:
-            r = requests.request(method, url, headers=auth, json=body, timeout=10,
-                                 verify=False, allow_redirects=False)
-            return {'status': r.status_code, 'body': r.text[:4000],
-                    'location': r.headers.get('Location', ''),
-                    'content_type': r.headers.get('Content-Type', '')}
-        except Exception:
-            return {'status': 0, 'body': '', 'location': '', 'content_type': ''}
+    # Transport partagé : session vivante (reauth) ou auth statique. Le base_send
+    # expose déjà Location + Content-Type (open redirect / XSS), redirections non suivies.
+    T = _diag_transport(config, args, zap_client, har_data)
+    execute = lambda url, method='GET', body=None: T.send(method, url, None, body)
 
     out = run_web_probes(execute, har_data, adjudicator=adjud)
     print(f"[WEB] {len(out)} blind-spot finding(s) "
@@ -1301,44 +1319,14 @@ def _run_adaptive_campaign(har_data, config, args, zap_client=None):
     from modules.llm.adaptive_campaign import AdaptiveCampaign
     from modules.llm.pattern_enricher import PatternEnricher
     from modules.llm.adaptive_idor import client_from_config
-    from modules.idor_detector import IDORDetector
 
-    # Les identifiants d'authentification du HAR sont rejoués pour tester l'accès
-    # avec le contexte du testeur (contexte offensif autorisé).
-    auth = IDORDetector.extract_auth_tokens(har_data) or {}
-
-    if zap_client is not None:
-        transport = 'ZAP proxy'
-
-        def http_get(url, method='GET'):
-            r = zap_client.request(method, url, headers=auth, follow_redirects=False)
-            return {'status': r.status_code, 'content_length': len(r.content or b''),
-                    'body': (r.text or '')[:2000]}
-
-        def http_write(url, method, payload):
-            r = zap_client.request(method, url, headers=auth, json_data=payload,
-                                   follow_redirects=False)
-            return {'status': r.status_code, 'body': (r.text or '')[:2000]}
-    else:
-        transport = 'direct requests'
-        import requests
-
-        def http_get(url, method='GET'):
-            try:
-                r = requests.request(method, url, headers=auth, timeout=10,
-                                     verify=False, allow_redirects=False)
-                return {'status': r.status_code, 'content_length': len(r.content),
-                        'body': r.text[:2000]}
-            except Exception:
-                return {'status': 0, 'content_length': 0, 'body': ''}
-
-        def http_write(url, method, payload):
-            try:
-                r = requests.request(method, url, headers=auth, json=payload, timeout=10,
-                                     verify=False, allow_redirects=False)
-                return {'status': r.status_code, 'body': r.text[:2000]}
-            except Exception:
-                return {'status': 0, 'body': ''}
+    # Transport partagé : session vivante (reauth) ou auth statique du HAR — rejouée
+    # pour tester l'accès avec le contexte du testeur (contexte offensif autorisé).
+    T = _diag_transport(config, args, zap_client, har_data)
+    transport = ('ZAP proxy' if zap_client is not None else 'direct requests') \
+        + (' + reauth session' if T.active else '')
+    http_get = lambda url, method='GET': T.send(method, url, None, None)
+    http_write = lambda url, method, payload: T.send(method, url, None, payload)
 
     client = client_from_config(config)
     domain = urlparse(args.target).netloc or 'unknown'
