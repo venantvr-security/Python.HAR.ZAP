@@ -27,10 +27,28 @@ from ..utils import get_logger
 logger = get_logger("llm.payload_synth")
 
 # Motifs interdits : on ne synthétise que de la DÉTECTION, jamais de la destruction.
+# Familles réellement dangereuses : écriture (DROP/TRUNCATE/DELETE/UPDATE/INSERT),
+# écriture de fichier / RCE (INTO OUTFILE/DUMPFILE, COPY ... TO PROGRAM, xp_cmdshell,
+# EXEC), exfiltration fichier (LOAD_FILE), et DoS (BENCHMARK, gros SLEEP/pg_sleep).
+# Matché APRÈS normalisation (commentaires SQL supprimés, espaces réduits) pour
+# résister à l'obfuscation type DROP/**/TABLE.
 _DESTRUCTIVE = re.compile(
-    r"\b(drop\s+table|drop\s+database|truncate|delete\s+from|update\s+.+\s+set|"
-    r"insert\s+into|shutdown|xp_cmdshell|rm\s+-rf|;\s*rm\b|mkfs|:\s*>\s*/|"
-    r"format\s+c:|dropdatabase|remove\s*\(|deleteone|deletemany)", re.I)
+    r"(drop\s+table|drop\s+database|dropdatabase|truncate|delete\s+from|"
+    r"update\s+.+\s+set|insert\s+into|replace\s+into|"
+    r"into\s+(out|dump)file|load_file|copy\s+.+\s+to\s+program|"
+    r"xp_cmdshell|sp_configure|sp_executesql|\bexec(ute)?\s*[\(@]|"
+    r"benchmark\s*\(|(pg_)?sleep\s*\(\s*\d{3,}|"
+    r"waitfor\s+delay\s*'0*:0*[1-9]\d|"
+    r"shutdown|xp_|\brm\s+-rf|;\s*rm\b|mkfs|:\s*>\s*/|format\s+c:|"
+    r"remove\s*\(|deleteone|deletemany|drop\s*\()", re.I)
+
+
+def _normalize(s: str) -> str:
+    """Neutralise l'obfuscation avant le filtre : commentaires SQL retirés,
+    espaces/tabs/newlines réduits à un seul. `DROP/**/TABLE` -> `drop table`."""
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)   # commentaires bloc
+    s = re.sub(r"\s+", " ", s)                       # espaces multiples
+    return s
 
 _MAX_PAYLOADS = 12
 _MAX_LEN = 200
@@ -109,7 +127,7 @@ def _sanitize(items) -> List[str]:
         s = str(it).strip()
         if not s or len(s) > _MAX_LEN or s in seen:
             continue
-        if _DESTRUCTIVE.search(s):                 # jamais de charge destructive
+        if _DESTRUCTIVE.search(_normalize(s)):      # jamais de charge destructive (dé-obfusquée)
             logger.info("synth_dropped_destructive", payload=s[:40])
             continue
         seen.add(s)

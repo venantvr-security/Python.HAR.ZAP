@@ -76,3 +76,17 @@ class TestExtrasReachProbe:
         assert probe_sqli(srv, [{'url': 'https://x/i?id=1', 'method': 'GET'}]) == []
         fs = probe_sqli(srv, [{'url': 'https://x/i?id=1', 'method': 'GET'}], extra=[magic])
         assert fs and fs[0].category == 'SQLI' and fs[0].payload == magic
+
+
+class TestDestructiveHardening:
+    def test_obfuscated_and_dangerous_blocked(self):
+        evil = ["'; DROP/**/TABLE users-- -", "' UNION SELECT 1 INTO OUTFILE '/x/s.php'-- -",
+                "' OR BENCHMARK(9999999,MD5(1))-- -", "' OR SLEEP(9999)-- -",
+                "'; COPY t TO PROGRAM 'sh'-- -", "' AND LOAD_FILE('/etc/shadow')-- -",
+                "'; DELETE  FROM t-- -", "'; exec('x')"]
+        assert _sanitize(evil) == []                      # tout bloqué, y compris obfusqué
+
+    def test_legit_detection_payloads_kept(self):
+        legit = ["' OR '1'='1", "' OR SLEEP(5)-- -", "' UNION SELECT NULL-- -",
+                 "1' AND '1'='1", "' OR pg_sleep(3)-- -"]
+        assert _sanitize(legit) == legit                  # détection non altérée
