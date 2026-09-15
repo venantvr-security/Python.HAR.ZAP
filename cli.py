@@ -224,6 +224,13 @@ Examples:
                              help='Active web blind-spot probes: path traversal/LFI, SSTI, reflected/stored XSS, open redirect, predictable reset token, CSV injection')
     diag_parser.add_argument('--injection', action='store_true',
                              help='Active SQL/NoSQL injection probes: error-based, time-based (differential), boolean-based, NoSQL operator injection')
+    diag_parser.add_argument('--auto', action='store_true',
+                             help='Adaptive orchestration: plan engines from the API shape, run one, '
+                                  're-plan from the findings, repeat (modules.llm.orchestrator). '
+                                  'With --ai, the plan is LLM-proposed (validated against a whitelist); '
+                                  'else a deterministic reactive planner. Replaces the manual engine flags.')
+    diag_parser.add_argument('--auto-budget', type=int,
+                             help='Max engines the --auto loop may run (default: all planned)')
     diag_parser.add_argument('--ai-record', metavar='FILE',
                              help='Record all LLM responses to a transcript (implies --ai)')
     diag_parser.add_argument('--ai-replay', metavar='FILE',
@@ -1209,6 +1216,56 @@ def _run_web_probes(har_data, config, args, zap_client):
     return out
 
 
+def _run_auto(har_data, config, args, zap_client, all_findings, report):
+    """Phase 2 — boucle d'orchestration adaptative : planifier les moteurs depuis
+    la forme de l'API, en lancer UN, réinjecter les findings, replanifier. Le plan
+    est proposé par l'IA (avec --ai, validé contre la liste blanche) sinon par le
+    planificateur déterministe réactif. Retourne le adaptive_result éventuel."""
+    from modules.llm.orchestrator import next_plan
+    from modules.llm.adaptive_idor import client_from_config
+    client = client_from_config(config) if getattr(args, 'ai', False) else None
+
+    # Moteurs à sortie « plate » exécutables en mono-session (diagnose).
+    runners = {
+        'investigate': _run_investigations,
+        'probes': _run_active_probes,
+        'web': _run_web_probes,
+        'injection': _run_injection_probes,
+        'business_flow': _run_business_flow,
+    }
+    from modules.llm.orchestrator import ENGINES
+    budget = getattr(args, 'auto_budget', None) or len(ENGINES)
+    adaptive_result = None
+    done = set()
+    print("[AUTO] orchestration adaptative (planifier -> lancer -> replanifier)")
+    for i in range(budget):
+        plan = next_plan(har_data, all_findings, client)   # replanifie sur les findings acquis
+        nxt = None
+        for eng in plan.engines():
+            if eng in done:
+                continue
+            if eng in runners or eng == 'adaptive':
+                nxt = eng
+                break
+            # Planifié mais hors périmètre diagnose (mono-session) : matrix_bola/graphql.
+            done.add(eng)
+            print(f"[AUTO]   '{eng}' planifié mais non exécutable en diagnose "
+                  "(multi-rôles/GraphQL) — utiliser la commande dédiée")
+        if nxt is None:
+            break
+        why = next((s.rationale for s in plan.ordered() if s.engine == nxt), '')
+        print(f"[AUTO] #{i + 1} [{plan.source}] -> {nxt}  « {why} »")
+        done.add(nxt)
+        if nxt == 'adaptive':
+            adaptive_result = _run_adaptive_campaign(har_data, config, args, zap_client=zap_client)
+            report['adaptive'] = adaptive_result.summary()
+        else:
+            all_findings.extend(runners[nxt](har_data, config, args, zap_client))
+    print(f"[AUTO] terminé — {len(done & (set(runners) | {'adaptive'}))} moteur(s) exécuté(s)")
+    report['auto'] = {'engines_run': sorted(done)}
+    return adaptive_result
+
+
 def _run_injection_probes(har_data, config, args, zap_client):
     """Sondes d'injection SQL/NoSQL (A03) via le transport partagé. error-based &
     time-based = CONFIRMED (marqueur/différentiel) ; boolean/near-miss = SUSPECTED
@@ -1628,10 +1685,19 @@ def run_diagnose(args):
         print(f"Total: {len(all_findings)}")
         print(f"\nReports: {args.output}/diagnostic_report.*")
 
+        auto = getattr(args, 'auto', False)
+        adaptive_result = None
+
+        # Phase 2 — orchestration adaptative : le plan décide des moteurs et
+        # réagit aux findings. Remplace les flags manuels (qui restent le défaut).
+        if auto:
+            adaptive_result = _run_auto(har_data, config, args, zap_client, all_findings, report)
+            with open(json_path, 'w') as f:
+                json.dump(report, f, indent=2)
+
         # Adaptive closed-loop attacks + payload pattern enrichment.
         # Attaques via le proxy ZAP quand il est disponible (sinon requests direct).
-        adaptive_result = None
-        if getattr(args, 'adaptive', False):
+        if getattr(args, 'adaptive', False) and not auto:
             adaptive_result = _run_adaptive_campaign(har_data, config, args,
                                                      zap_client=zap_client)
             report['adaptive'] = adaptive_result.summary()
@@ -1639,7 +1705,7 @@ def run_diagnose(args):
                 json.dump(report, f, indent=2)
 
         # Active probes (API4 rate-limit, API7 SSRF, API2 auth) — append to findings.
-        if getattr(args, 'probes', False):
+        if getattr(args, 'probes', False) and not auto:
             all_findings.extend(_run_active_probes(har_data, config, args, zap_client))
 
         # Shadow endpoints (API9) — HAR vs OpenAPI spec diff.
@@ -1647,19 +1713,19 @@ def run_diagnose(args):
             all_findings.extend(_run_shadow_endpoints(har_data, args, config))
 
         # Active business-flow abuse (API6): state-skip / value manipulation / replay.
-        if getattr(args, 'business_flow', False):
+        if getattr(args, 'business_flow', False) and not auto:
             all_findings.extend(_run_business_flow(har_data, config, args, zap_client))
 
         # Second-order investigations (shadow routes API9 + auth forge API2).
-        if getattr(args, 'investigate', False):
+        if getattr(args, 'investigate', False) and not auto:
             all_findings.extend(_run_investigations(har_data, config, args, zap_client))
 
         # Web blind-spots (path traversal, SSTI, XSS, open redirect, weak reset, CSV).
-        if getattr(args, 'web', False):
+        if getattr(args, 'web', False) and not auto:
             all_findings.extend(_run_web_probes(har_data, config, args, zap_client))
 
         # SQL/NoSQL injection (A03).
-        if getattr(args, 'injection', False):
+        if getattr(args, 'injection', False) and not auto:
             all_findings.extend(_run_injection_probes(har_data, config, args, zap_client))
 
         # Enrichissement ZAP : charges prouvées (SSRF/traversal/SSTI/XSS/redirect)
