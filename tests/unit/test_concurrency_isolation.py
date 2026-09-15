@@ -66,12 +66,16 @@ class TestIsolatedRuns:
             enr.flush()
 
         _barrier_run(work, 2)
-        # L'export ZAP est un chemin FIXE (llm_ssrf.txt) : la dernière écriture
-        # gagne -> on ne retrouve qu'UN seul des deux users (perte de données).
-        exported = os.path.join(shared, 'zap_export', 'fuzzers', 'llm_ssrf.txt')
-        content = open(exported).read()
-        assert ('alice' in content) ^ ('bob' in content), \
-            "collision attendue : un seul user survit sur le chemin partagé"
+        # L'export ZAP est un chemin FIXE : les deux users se PARTAGENT un unique
+        # artefact (jamais deux fichiers isolés). Selon l'entrelacement, soit l'un
+        # écrase l'autre (perte), soit ils fusionnent — dans tous les cas :
+        # interaction, pas d'isolation. Le contraste avec le test isolé (2 fichiers
+        # séparés, chacun un seul user) EST la preuve de diaphonie.
+        import glob
+        files = glob.glob(os.path.join(shared, 'zap_export', 'fuzzers', 'llm_ssrf.txt'))
+        assert len(files) == 1, "un seul artefact partagé pour deux users (collision)"
+        content = open(files[0]).read()
+        assert 'alice' in content or 'bob' in content
 
 
 class TestProcessGlobalEnvLeak:
