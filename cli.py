@@ -231,6 +231,11 @@ Examples:
                                   'else a deterministic reactive planner. Replaces the manual engine flags.')
     diag_parser.add_argument('--auto-budget', type=int,
                              help='Max engines the --auto loop may run (default: all planned)')
+    diag_parser.add_argument('--goal', metavar='TEXT',
+                             help='Natural-language scoping for --auto, e.g. "authz only, '
+                                  'non destructive" or "only /billing". Selects/denies engines, '
+                                  'restricts paths, and can force read-only (LLM-interpreted with '
+                                  '--ai, else keyword-based).')
     diag_parser.add_argument('--ai-record', metavar='FILE',
                              help='Record all LLM responses to a transcript (implies --ai)')
     diag_parser.add_argument('--ai-replay', metavar='FILE',
@@ -1221,9 +1226,19 @@ def _run_auto(har_data, config, args, zap_client, all_findings, report):
     la forme de l'API, en lancer UN, réinjecter les findings, replanifier. Le plan
     est proposé par l'IA (avec --ai, validé contre la liste blanche) sinon par le
     planificateur déterministe réactif. Retourne le adaptive_result éventuel."""
-    from modules.llm.orchestrator import next_plan
+    from modules.llm.orchestrator import next_plan, interpret_goal, filter_har, ENGINES
     from modules.llm.adaptive_idor import client_from_config
     client = client_from_config(config) if getattr(args, 'ai', False) else None
+
+    # Phase 3 : scoping en langage naturel (--goal) -> contraintes de plan/périmètre.
+    constraints = interpret_goal(getattr(args, 'goal', None), client)
+    har_used = har_data
+    if constraints is not None:
+        if constraints.path_include or constraints.path_exclude:
+            har_used = filter_har(har_data, constraints.path_include, constraints.path_exclude)
+        report['auto_goal'] = {'goal': args.goal, 'constraints': constraints.to_dict(),
+                               'scoped_endpoints': len(har_used.get('log', {}).get('entries', []))}
+        print(f"[GOAL] « {args.goal} » [{constraints.source}] -> {constraints.to_dict()}")
 
     # Moteurs à sortie « plate » exécutables en mono-session (diagnose).
     runners = {
@@ -1233,13 +1248,14 @@ def _run_auto(har_data, config, args, zap_client, all_findings, report):
         'injection': _run_injection_probes,
         'business_flow': _run_business_flow,
     }
-    from modules.llm.orchestrator import ENGINES
     budget = getattr(args, 'auto_budget', None) or len(ENGINES)
     adaptive_result = None
     done = set()
     print("[AUTO] orchestration adaptative (planifier -> lancer -> replanifier)")
     for i in range(budget):
-        plan = next_plan(har_data, all_findings, client)   # replanifie sur les findings acquis
+        plan = next_plan(har_used, all_findings, client)   # replanifie sur les findings acquis
+        if constraints is not None:
+            plan = constraints.apply(plan)                 # applique le périmètre --goal
         nxt = None
         for eng in plan.engines():
             if eng in done:
@@ -1257,10 +1273,10 @@ def _run_auto(har_data, config, args, zap_client, all_findings, report):
         print(f"[AUTO] #{i + 1} [{plan.source}] -> {nxt}  « {why} »")
         done.add(nxt)
         if nxt == 'adaptive':
-            adaptive_result = _run_adaptive_campaign(har_data, config, args, zap_client=zap_client)
+            adaptive_result = _run_adaptive_campaign(har_used, config, args, zap_client=zap_client)
             report['adaptive'] = adaptive_result.summary()
         else:
-            all_findings.extend(runners[nxt](har_data, config, args, zap_client))
+            all_findings.extend(runners[nxt](har_used, config, args, zap_client))
     print(f"[AUTO] terminé — {len(done & (set(runners) | {'adaptive'}))} moteur(s) exécuté(s)")
     report['auto'] = {'engines_run': sorted(done)}
     return adaptive_result

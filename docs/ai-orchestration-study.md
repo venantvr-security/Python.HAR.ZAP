@@ -96,11 +96,14 @@ la validation liste blanche et le repli.
 ## 6. Feuille de route
 
 - **Phase 1 (fait)** — planificateur pur (déterministe + IA-propose-validée) + tests.
-- **Phase 2** — brancher `next_plan` dans `run_diagnose` : boucle « planifier → lancer
-  un moteur → réinjecter les findings → replanifier », derrière un flag `--auto`
-  (les flags manuels restent le mode par défaut).
-- **Phase 3** — scoping en langage naturel (`--goal "authz only, non destructive"`
-  → contraintes de sélection) et synthèse de payloads par endpoint.
+- **Phase 2 (fait)** — `next_plan` branché dans `run_diagnose` : boucle « planifier →
+  lancer un moteur → réinjecter les findings → replanifier », flag `--auto` (les
+  flags manuels restent le défaut).
+- **Phase 3 (fait, scoping)** — `--goal "authz only, non destructive"` :
+  `interpret_goal` traduit la consigne en `ScopeConstraints` (allow/deny de moteurs,
+  chemins inclus/exclus, lecture seule) — IA-raffinée puis **validée contre la liste
+  blanche**, sinon parseur par mots-clés. Le plan et le HAR sont filtrés en
+  conséquence. Reste à faire : synthèse de payloads par endpoint (Phase 3b).
 - **Phase 4** — corrélation → follow-up dirigé (un finding déclenche une sonde
   ciblée), fusion avec `exploit_chainer`.
 
