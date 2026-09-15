@@ -226,7 +226,13 @@ _G_SSRF = re.compile(r'\bssrf\b', re.I)
 _G_SHADOW = re.compile(r'(shadow|inventor|découverte d.?endpoint|\bdebug\b|actuator)', re.I)
 _G_NONDEST = re.compile(r'(non[\s-]?destructi|read[\s-]?only|lecture seule|passive|passif|'
                         r'\bsafe\b|sans écriture|sans modif)', re.I)
-_G_PATH = re.compile(r'/[A-Za-z0-9][\w/\-]*')
+# Chemin d'URL dans une consigne libre. La barre d'un VRAI chemin n'est jamais
+# collée à un mot : « /billing », « sur /admin » sont des chemins, mais « SQL/NoSQL »,
+# « authn/authz », « 24/7 » sont des alternatives/fractions en prose — pas des
+# chemins. Sans ce garde-fou, `--goal "teste l'injection SQL/NoSQL"` extrayait
+# `/NoSQL`, restreignait le périmètre à 0 endpoint et le scan ne trouvait RIEN,
+# silencieusement. Le lookbehind exige que la barre suive un début/espace/quote.
+_G_PATH = re.compile(r'(?<![\w/])/[A-Za-z0-9][\w/\-]*')
 
 
 def _deterministic_goal(goal: str) -> ScopeConstraints:

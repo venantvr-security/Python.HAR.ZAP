@@ -142,6 +142,18 @@ class TestGoalScoping:
         c = interpret_goal("only /billing and /invoices")
         assert '/billing' in c.path_include and '/invoices' in c.path_include
 
+    def test_slash_in_prose_is_not_a_path(self):
+        # « SQL/NoSQL », « authn/authz », « 24/7 » sont des alternatives/fractions,
+        # pas des chemins : sans garde-fou, `/NoSQL` restreignait le scan à 0 endpoint.
+        for goal in ("teste l'injection SQL/NoSQL", "scanne authn/authz",
+                     "disponibilité 24/7 en lecture seule"):
+            assert interpret_goal(goal).path_include == [], goal
+
+    def test_real_paths_still_extracted_amid_prose(self):
+        c = interpret_goal("teste l'injection SQL/NoSQL sur /articles/search")
+        assert c.path_include == ['/articles/search']
+        assert 'injection' in (c.allow_engines or set())
+
     def test_no_goal_returns_none(self):
         assert interpret_goal(None) is None
         assert interpret_goal("") is None
