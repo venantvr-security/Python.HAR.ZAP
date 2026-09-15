@@ -1279,6 +1279,27 @@ def _run_auto(har_data, config, args, zap_client, all_findings, report):
             all_findings.extend(runners[nxt](har_used, config, args, zap_client))
     print(f"[AUTO] terminé — {len(done & (set(runners) | {'adaptive'}))} moteur(s) exécuté(s)")
     report['auto'] = {'engines_run': sorted(done)}
+
+    # Phase 4 : follow-up dirigé (récolte de secrets sur les shadow confirmés) +
+    # recommandations d'actions, puis FUSION avec le chaîneur d'exploits.
+    from modules.llm.followup import run_followups
+    from modules.llm.exploit_chainer import compose_chains
+    from urllib.parse import urljoin
+    T = _diag_transport(config, args, zap_client, har_used)
+    # Résout les URLs relatives des findings (routes shadow) contre la cible.
+    fu_exec = lambda u, m='GET', b=None: T.send(m, urljoin(args.target + '/', u.lstrip('/')), None, b)
+    harvested, recs = run_followups(all_findings, fu_exec)
+    if harvested:
+        all_findings.extend(harvested)
+        print(f"[FOLLOWUP] {len(harvested)} escalade(s) (secrets récoltés)")
+    if recs:
+        print(f"[FOLLOWUP] {len(recs)} action(s) ciblée(s) recommandée(s)")
+    report['followups'] = {'escalations': harvested, 'recommendations': recs}
+
+    chains = compose_chains(all_findings, client=client)   # fusion orchestration <-> chaînes
+    report['exploit_chains'] = [c.to_dict() for c in chains]
+    if chains:
+        print(f"[CHAINS] {len(chains)} chaîne(s) d'exploitation composée(s)")
     return adaptive_result
 
 
@@ -1793,7 +1814,8 @@ def run_diagnose(args):
         _run_coverage(har_data, all_findings, adaptive_result, args, report)
 
         # Exploit chains (LLM with --ai, else deterministic combos).
-        if getattr(args, 'chains', False):
+        # En mode --auto, la Phase 4 a déjà composé les chaînes (fusion).
+        if getattr(args, 'chains', False) and not auto:
             _run_exploit_chains(all_findings, adaptive_result, args, config, report)
 
         with open(json_path, 'w') as f:

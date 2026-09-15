@@ -104,8 +104,11 @@ la validation liste blanche et le repli.
   chemins inclus/exclus, lecture seule) — IA-raffinée puis **validée contre la liste
   blanche**, sinon parseur par mots-clés. Le plan et le HAR sont filtrés en
   conséquence. Reste à faire : synthèse de payloads par endpoint (Phase 3b).
-- **Phase 4** — corrélation → follow-up dirigé (un finding déclenche une sonde
-  ciblée), fusion avec `exploit_chainer`.
+- **Phase 4 (fait)** — follow-up dirigé + fusion `exploit_chainer` dans `--auto` :
+  un endpoint shadow CONFIRMÉ est relu pour en **récolter les secrets** (escalade
+  Critical), des **recommandations d'actions** ciblées sont déduites des findings
+  (SSRF→pivot interne, JWT→BFLA, BOLA→exfiltration), et les **chaînes d'exploitation**
+  sont composées automatiquement (`modules.llm.followup` + `exploit_chainer`).
 
 ## 7. Verdict
 
