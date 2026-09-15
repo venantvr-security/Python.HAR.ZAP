@@ -554,6 +554,8 @@ llm:
 # ---------------------------------------------------------------------------
 # reauth:
 #   base_url: "https://app.example"
+#   recipe_file: "./.harzap_auth.dsl"  # MÉMOIRE : les specs déduites par l'IA y sont
+#                                       # persistées (DSL) ; relues ensuite -> plus d'appel modèle
 #   login:
 #     url: "/login"
 #     method: "POST"
