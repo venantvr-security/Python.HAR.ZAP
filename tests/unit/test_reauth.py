@@ -185,3 +185,44 @@ class TestCompositeAndConfig:
 
     def test_from_config_absent(self):
         assert ReAuthenticator.from_config({}) is None
+
+
+class _CountingClient:
+    """Client LLM qui compte ses appels — pour prouver la non-régression IA."""
+    def __init__(self, content):
+        self._c = content
+        self.calls = 0
+    def complete(self, user, system=None):
+        self.calls += 1
+        class R: content = self._c
+        return R()
+
+
+class TestPersistenceSkipsAi:
+    def test_ai_derives_once_then_dsl_takes_over(self, tmp_path):
+        recipe_file = str(tmp_path / 'auth.dsl')
+        client = _CountingClient('{"strategy":"regex","url":"/login","pattern":"value=\\"([^\\"]+)\\""}')
+        cfg = {'reauth': {'base_url': 'http://app', 'recipe_file': recipe_file,
+               'login': {'url': '/login', 'credentials': {'user': 'a', 'password': 'x'},
+                         'nonce_field': 'csrf'},
+               'nonce': {'strategy': 'ai', 'url': '/login'},
+               'session': {'strategy': 'cookie', 'names': ['sid']},
+               'rotation': {'strategy': 'cookie'},
+               'expiry': {'strategies': [{'strategy': 'redirect', 'login_path': '/login'}]},
+               'source': 'render(csrf=...)'}}
+
+        # Run 1 : l'IA déduit le nonce (1 appel) et l'écrit dans le DSL.
+        app1 = FakeApp(rotate=False)
+        ra1 = ReAuthenticator.from_config(cfg, client=client)
+        assert ra1.login(app1.send) is True
+        assert client.calls == 1
+        import os
+        assert os.path.exists(recipe_file)
+        assert 'regex' in open(recipe_file).read()
+
+        # Run 2 : nouveau process -> from_config relit le DSL -> stratégie concrète,
+        # l'IA n'est PLUS appelée.
+        app2 = FakeApp(rotate=False)
+        ra2 = ReAuthenticator.from_config(cfg, client=client)
+        assert ra2.login(app2.send) is True
+        assert client.calls == 1                        # aucun nouvel appel modèle

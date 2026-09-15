@@ -187,10 +187,13 @@ class CookieNonce(NonceStrategy):
 class AiNonce(NonceStrategy):
     """L'IA DÉDUIT du code source où est le nonce et rend une spec d'extraction
     concrète (regex/json/cookie), exécutée ensuite de façon déterministe et mise
-    en cache. Sans client → inerte (None)."""
+    en cache. La spec est PERSISTÉE dans le DSL (store) → plus d'appel IA ensuite.
+    Sans client → inerte (None)."""
     url: str
     source: str = ''
     client: object = None
+    store: object = None           # AuthRecipeStore (persistance DSL)
+    host: str = ''
     _derived: Optional[NonceStrategy] = field(default=None, init=False)
 
     def fetch(self, send, base_url):
@@ -198,9 +201,14 @@ class AiNonce(NonceStrategy):
             if self.client is None:
                 return None
             sample = send('GET', urljoin(base_url, self.url)) or {}
-            self._derived = _ai_derive_extraction(
-                self.client, kind='nonce', url=self.url, source=self.source,
-                sample=sample) or _NULL_NONCE
+            spec = _ai_derive_extraction(self.client, kind='nonce', url=self.url,
+                                         source=self.source, sample=sample)
+            if spec is not None:
+                if self.store is not None and self.host:
+                    self.store.record_slot(self.host, 'nonce', spec)   # mémoire persistante
+                self._derived = _build(NONCE_STRATEGIES, spec) or _NULL_NONCE
+            else:
+                self._derived = _NULL_NONCE
         return self._derived.fetch(send, base_url)
 
 
@@ -269,18 +277,26 @@ class HeaderSession(SessionStrategy):
 @dataclass
 class AiSession(SessionStrategy):
     """L'IA déduit du code source comment la session est rendue et produit une
-    spec concrète (cookie/json/header), exécutée déterministiquement + cachée."""
+    spec concrète (cookie/json/header), exécutée déterministiquement, cachée ET
+    persistée dans le DSL (store) → plus d'appel IA ensuite."""
     source: str = ''
     client: object = None
+    store: object = None           # AuthRecipeStore (persistance DSL)
+    host: str = ''
     _derived: Optional[SessionStrategy] = field(default=None, init=False)
 
     def capture(self, resp, store):
         if self._derived is None:
             if self.client is None:
                 return
-            self._derived = _ai_derive_extraction(
-                self.client, kind='session', url='', source=self.source,
-                sample=resp) or _NULL_SESSION
+            spec = _ai_derive_extraction(self.client, kind='session', url='',
+                                         source=self.source, sample=resp)
+            if spec is not None:
+                if self.store is not None and self.host:
+                    self.store.record_slot(self.host, 'session', spec)  # mémoire persistante
+                self._derived = _build(SESSION_STRATEGIES, spec) or _NULL_SESSION
+            else:
+                self._derived = _NULL_SESSION
         self._derived.capture(resp, store)
 
 
@@ -396,6 +412,7 @@ NONCE_STRATEGIES = {'regex': RegexNonce, 'json': JsonNonce, 'cookie': CookieNonc
 SESSION_STRATEGIES = {'cookie': CookieSession, 'json': JsonSession, 'header': HeaderSession, 'ai': AiSession}
 ROTATION_STRATEGIES = {'cookie': RotatingCookie, 'header': RotatingHeader, 'none': NoRotation}
 EXPIRY_STRATEGIES = {'redirect': RedirectExpiry, 'cookie_ttl': CookieTtlExpiry, 'ai': AiExpiry}
+_REG = {'nonce': NONCE_STRATEGIES, 'session': SESSION_STRATEGIES}
 
 
 def _build(registry: Dict, spec, client=None, source=''):
@@ -510,13 +527,41 @@ class ReAuthenticator:
             return None
         source = rc.get('source', '')
         login = rc.get('login', {})
+        base_url = rc.get('base_url', '')
+
+        # Mémoire DSL : une recette déjà découverte remplace la stratégie 'ai'
+        # (plus aucun appel modèle). Les slots 'ai' non encore résolus reçoivent
+        # le store pour écrire leur découverte au premier login.
+        from urllib.parse import urlparse as _up
+        host = _up(base_url).netloc or base_url
+        store = None
+        recipe_file = rc.get('recipe_file')
+        if recipe_file:
+            from .auth_dsl import AuthRecipeStore
+            store = AuthRecipeStore(recipe_file)
+
+        def _slot(name):
+            spec = rc.get(name)
+            # Déjà mémorisé concrètement ? on l'utilise, l'IA est court-circuitée.
+            if store is not None and store.has_slot(host, name):
+                return _build(_REG[name], store.get(host)[name])
+            # Sinon on construit (peut être 'ai') en passant store+host pour l'écriture.
+            reg = _REG[name]
+            if spec and spec.get('strategy') == 'ai':
+                built = spec.copy()
+                s = _build(reg, built, client, source)
+                if s is not None and store is not None:
+                    s.store, s.host = store, host
+                return s
+            return _build(reg, spec, client, source)
+
         recipe = LoginRecipe(
             login_url=login.get('url', '/login'),
             method=login.get('method', 'POST'),
             credentials=login.get('credentials', {}),
             nonce_field=login.get('nonce_field'),
-            nonce=_build(NONCE_STRATEGIES, rc.get('nonce'), client, source),
-            session=_build(SESSION_STRATEGIES, rc.get('session'), client, source),
+            nonce=_slot('nonce'),
+            session=_slot('session'),
         )
         rotation = _build(ROTATION_STRATEGIES, rc.get('rotation')) or RotatingCookie()
         exp_spec = rc.get('expiry') or {}
@@ -525,16 +570,16 @@ class ReAuthenticator:
                                       for s in exp_spec['strategies']])
         else:
             expiry = _build(EXPIRY_STRATEGIES, exp_spec, client) or RedirectExpiry()
-        return cls(recipe, rotation, expiry, base_url=rc.get('base_url', ''))
+        return cls(recipe, rotation, expiry, base_url=base_url)
 
 
 # =============================================================================
 # Ponts IA (proposent une spec / une décision ; jamais d'exécution directe)
 # =============================================================================
 def _ai_derive_extraction(client, kind: str, url: str, source: str, sample: Dict):
-    """Demande à l'IA UNE spec d'extraction concrète à partir du code source et
-    d'un échantillon de réponse, puis instancie la stratégie déterministe
-    correspondante. `kind` ∈ {'nonce','session'}."""
+    """Demande à l'IA UNE spec d'extraction concrète (dict {strategy, ...}) à
+    partir du code source et d'un échantillon de réponse. Le dict est validable,
+    persistable dans le DSL, et instanciable par _build. `kind` ∈ {'nonce','session'}."""
     reg = NONCE_STRATEGIES if kind == 'nonce' else SESSION_STRATEGIES
     body = (sample.get('body', '') or '')[:1500]
     headers = sample.get('headers') or {}
@@ -557,13 +602,14 @@ def _ai_derive_extraction(client, kind: str, url: str, source: str, sample: Dict
     except Exception as e:
         logger.warning("ai_derive_failed", kind=kind, error=str(e))
         return None
-    if not isinstance(spec, dict):
+    if not isinstance(spec, dict) or spec.get('strategy') not in reg:
         return None
     try:
-        return _build(reg, spec)
+        _build(reg, spec)                # valide que la spec est instanciable
     except Exception as e:
         logger.warning("ai_derive_bad_spec", kind=kind, error=str(e), spec=spec)
         return None
+    return spec
 
 
 def _ai_session_dead(client, resp: Dict) -> bool:
